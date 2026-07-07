@@ -1880,13 +1880,23 @@ async function extractAndGeocode(text){
   }
   let added = 0, duplicates = 0, failed = 0, soft = 0, regionFallback = 0, tooFar = 0;
   
-  // Oblicz centrum geograficzne istniejących punktów (jeśli są)
-  let centerLat = null, centerLng = null;
+  // Wykryj dominujący region z kodów pocztowych w tekście OCR
+  const dominantRegion = detectDominantRegion(text);
+  
+  // Oblicz centrum geograficzne istniejących punktów LUB użyj dominującego regionu
+  let centerLat = null, centerLng = null, useRegionCheck = false;
   const existingPoints = stops.filter(s => s.lat && s.lng && s.type === 'waypoint');
+  
   if(existingPoints.length > 0){
+    // Mamy już punkty - użyj ich centrum
     centerLat = existingPoints.reduce((sum, s) => sum + s.lat, 0) / existingPoints.length;
     centerLng = existingPoints.reduce((sum, s) => sum + s.lng, 0) / existingPoints.length;
+    useRegionCheck = true;
+  } else if(dominantRegion){
+    // Pierwszy OCR - sprawdź czy wszystkie punkty mają ten sam prefiks kodu pocztowego
+    useRegionCheck = true; // Włącz sprawdzanie po prefiksie
   }
+  
   const MAX_DISTANCE_KM = 150; // Maksymalna odległość od centrum (150km)
   
   for(let idx = 0; idx < candidates.length; idx++){
@@ -1906,20 +1916,40 @@ async function extractAndGeocode(text){
     }
     
     // WERYFIKACJA GEOGRAFICZNA - czy punkt nie jest za daleko od pozostałych?
-    if(centerLat && centerLng){
-      const distanceFromCenter = haversine({lat: centerLat, lng: centerLng}, {lat: loc.lat, lng: loc.lng});
-      if(distanceFromCenter > MAX_DISTANCE_KM){
-        candidatesWithIssues.set(idx, c);
-        row.className = 'candidate-item fail';
-        row.innerHTML = `<div style="flex:1;">
-          <div class="candidate-name">⚠️ ${escapeHtml(c.name)} - PODEJRZANY ADRES${phoneSuffix}</div>
-          <div class="candidate-addr">${escapeHtml(loc.formatted)} <span style="color:var(--red);font-weight:700;">(${Math.round(distanceFromCenter)} km od pozostałych!)</span></div>
-          <div style="font-size:10px;color:var(--red);margin-top:4px;"><b>OCR prawdopodobnie źle rozpoznał adres.</b> Sprawdź i popraw ręcznie.</div>
-        </div>
-        <div class="candidate-actions"><button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button></div>`;
-        resultBox.appendChild(row);
-        tooFar++;
-        continue;
+    if(useRegionCheck){
+      // Jeśli mamy centrum - sprawdź odległość
+      if(centerLat && centerLng){
+        const distanceFromCenter = haversine({lat: centerLat, lng: centerLng}, {lat: loc.lat, lng: loc.lng});
+        if(distanceFromCenter > MAX_DISTANCE_KM){
+          candidatesWithIssues.set(idx, c);
+          row.className = 'candidate-item fail';
+          row.innerHTML = `<div style="flex:1;">
+            <div class="candidate-name">⚠️ ${escapeHtml(c.name)} - PODEJRZANY ADRES${phoneSuffix}</div>
+            <div class="candidate-addr">${escapeHtml(loc.formatted)} <span style="color:var(--red);font-weight:700;">(${Math.round(distanceFromCenter)} km od pozostałych!)</span></div>
+            <div style="font-size:10px;color:var(--red);margin-top:4px;"><b>OCR prawdopodobnie źle rozpoznał adres.</b> Sprawdź i popraw ręcznie.</div>
+          </div>
+          <div class="candidate-actions"><button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button></div>`;
+          resultBox.appendChild(row);
+          tooFar++;
+          continue;
+        }
+      } 
+      // Jeśli nie ma centrum ale jest dominujący region - sprawdź prefiks kodu pocztowego
+      else if(dominantRegion){
+        const locPostalPrefix = extractPostalPrefix(loc.formatted);
+        if(locPostalPrefix && locPostalPrefix !== dominantRegion){
+          candidatesWithIssues.set(idx, c);
+          row.className = 'candidate-item fail';
+          row.innerHTML = `<div style="flex:1;">
+            <div class="candidate-name">⚠️ ${escapeHtml(c.name)} - PODEJRZANY REGION${phoneSuffix}</div>
+            <div class="candidate-addr">${escapeHtml(loc.formatted)} <span style="color:var(--red);font-weight:700;">(region ${locPostalPrefix}-XXX, oczekiwano ${dominantRegion}-XXX)</span></div>
+            <div style="font-size:10px;color:var(--red);margin-top:4px;"><b>OCR prawdopodobnie źle rozpoznał adres.</b> Inne punkty są w regionie ${dominantRegion}-XXX.</div>
+          </div>
+          <div class="candidate-actions"><button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button></div>`;
+          resultBox.appendChild(row);
+          tooFar++;
+          continue;
+        }
       }
     }
     
