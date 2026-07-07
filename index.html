@@ -419,14 +419,14 @@
           <div class="collapsible-body">
             <div class="radio-group">
               <label>
-                <input type="radio" name="orderMode" value="manual" checked>
+                <input type="radio" name="orderMode" value="manual">
                 <div>
                   <div><b>Ręczna — dodaj punkty i przeciągaj</b></div>
                   <div class="desc">Przycisk "Ułóż trasę" doda wszystkie punkty, potem przeciągaj aby zmienić kolejność</div>
                 </div>
               </label>
               <label>
-                <input type="radio" name="orderMode" value="geo">
+                <input type="radio" name="orderMode" value="geo" checked>
                 <div>
                   <div><b>Geograficzna — automatyczna optymalizacja</b></div>
                   <div class="desc">Przycisk "Ułóż trasę" doda i automatycznie ułoży punkty geograficznie (najbliższy sąsiad)</div>
@@ -683,7 +683,7 @@ let returnToStartActive = false;
 let pendingFiles = [];
 let map, markers = [], routeLine = null;
 let markerByStopId = new Map();
-let orderMode = 'manual';
+let orderMode = 'geo'; // DOMYŚLNIE GEOGRAFICZNA OPTYMALIZACJA
 let nextRouteIndex = 0;
 let dominantRegion = null;
 let candidatesWithIssues = new Map();
@@ -1858,7 +1858,23 @@ async function acceptFixDialog(){
   if(loc){
     if(!isDuplicate(loc.lat, loc.lng) && !isTextDuplicate(name, loc.formatted)){
       const placeInfo = await resolveGooglePlace(name, loc.formatted, loc.lat, loc.lng);
-      stops.push({ id: ++stopCounter, type: 'waypoint', name, address: loc.formatted, phone: candidatesWithIssues.get(fixDialogIdx)?.phone || '', lat: loc.lat, lng: loc.lng, isEditing: false, visited: false, isCompany: placeInfo.isCompany, googlePlaceName: placeInfo.googlePlaceName, googlePlaceId: placeInfo.googlePlaceId, routeIndex: null });
+      stops.push({ 
+        id: ++stopCounter, 
+        type: 'waypoint', 
+        name, 
+        address: loc.formatted, 
+        phone: candidatesWithIssues.get(fixDialogIdx)?.phone || '', 
+        lat: loc.lat, 
+        lng: loc.lng, 
+        isEditing: false, 
+        visited: false, 
+        isCompany: placeInfo.isCompany, 
+        googlePlaceName: placeInfo.googlePlaceName, 
+        googlePlaceId: placeInfo.googlePlaceId, 
+        routeIndex: null,
+        softQuality: false,
+        manuallyVerified: true  // Poprawiony ręcznie = zweryfikowany
+      });
       renderStops(); updateMap(); calculateRoute();
       showToast(`✅ Dodano: ${name}`);
     } else { showToast('Duplikat', 'error'); }
@@ -1878,26 +1894,13 @@ async function extractAndGeocode(text){
     showToast('Nie rozpoznano odbiorców', 'error');
     return;
   }
-  let added = 0, duplicates = 0, failed = 0, soft = 0, regionFallback = 0, tooFar = 0;
+  let added = 0, duplicates = 0, failed = 0, soft = 0, regionFallback = 0, suspicious = 0;
   
-  // Wykryj dominujący region z kodów pocztowych w tekście OCR
-  const dominantRegion = detectDominantRegion(text);
-  
-  // Oblicz centrum geograficzne istniejących punktów LUB użyj dominującego regionu
-  let centerLat = null, centerLng = null, useRegionCheck = false;
-  const existingPoints = stops.filter(s => s.lat && s.lng && s.type === 'waypoint');
-  
-  if(existingPoints.length > 0){
-    // Mamy już punkty - użyj ich centrum
-    centerLat = existingPoints.reduce((sum, s) => sum + s.lat, 0) / existingPoints.length;
-    centerLng = existingPoints.reduce((sum, s) => sum + s.lng, 0) / existingPoints.length;
-    useRegionCheck = true;
-  } else if(dominantRegion){
-    // Pierwszy OCR - sprawdź czy wszystkie punkty mają ten sam prefiks kodu pocztowego
-    useRegionCheck = true; // Włącz sprawdzanie po prefiksie
-  }
-  
-  const MAX_DISTANCE_KM = 150; // Maksymalna odległość od centrum (150km)
+  // Tablice na wiersze - kolejność: podejrzane (czerwone) → niepewne (żółte) → normalne (zielone)
+  const suspiciousRows = [];
+  const uncertainRows = [];  // soft/regionFallback (żółte)
+  const normalRows = [];      // normalne (zielone)
+  const failedRows = [];
   
   for(let idx = 0; idx < candidates.length; idx++){
     const c = candidates[idx];
@@ -1910,80 +1913,100 @@ async function extractAndGeocode(text){
       row.className = 'candidate-item fail';
       row.innerHTML = `<div style="flex:1;"><div class="candidate-name">❌ ${escapeHtml(c.name)}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(c.query)}</div></div>
         <div class="candidate-actions"><button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button></div>`;
-      resultBox.appendChild(row);
+      failedRows.push(row);
       failed++;
       continue;
     }
     
-    // WERYFIKACJA GEOGRAFICZNA - czy punkt nie jest za daleko od pozostałych?
-    if(useRegionCheck){
-      // Jeśli mamy centrum - sprawdź odległość
-      if(centerLat && centerLng){
-        const distanceFromCenter = haversine({lat: centerLat, lng: centerLng}, {lat: loc.lat, lng: loc.lng});
-        if(distanceFromCenter > MAX_DISTANCE_KM){
-          candidatesWithIssues.set(idx, c);
-          row.className = 'candidate-item fail';
-          row.innerHTML = `<div style="flex:1;">
-            <div class="candidate-name">⚠️ ${escapeHtml(c.name)} - PODEJRZANY ADRES${phoneSuffix}</div>
-            <div class="candidate-addr">${escapeHtml(loc.formatted)} <span style="color:var(--red);font-weight:700;">(${Math.round(distanceFromCenter)} km od pozostałych!)</span></div>
-            <div style="font-size:10px;color:var(--red);margin-top:4px;"><b>OCR prawdopodobnie źle rozpoznał adres.</b> Sprawdź i popraw ręcznie.</div>
-          </div>
-          <div class="candidate-actions"><button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button></div>`;
-          resultBox.appendChild(row);
-          tooFar++;
-          continue;
-        }
-      } 
-      // Jeśli nie ma centrum ale jest dominujący region - sprawdź prefiks kodu pocztowego
-      else if(dominantRegion){
-        const locPostalPrefix = extractPostalPrefix(loc.formatted);
-        if(locPostalPrefix && locPostalPrefix !== dominantRegion){
-          candidatesWithIssues.set(idx, c);
-          row.className = 'candidate-item fail';
-          row.innerHTML = `<div style="flex:1;">
-            <div class="candidate-name">⚠️ ${escapeHtml(c.name)} - PODEJRZANY REGION${phoneSuffix}</div>
-            <div class="candidate-addr">${escapeHtml(loc.formatted)} <span style="color:var(--red);font-weight:700;">(region ${locPostalPrefix}-XXX, oczekiwano ${dominantRegion}-XXX)</span></div>
-            <div style="font-size:10px;color:var(--red);margin-top:4px;"><b>OCR prawdopodobnie źle rozpoznał adres.</b> Inne punkty są w regionie ${dominantRegion}-XXX.</div>
-          </div>
-          <div class="candidate-actions"><button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button></div>`;
-          resultBox.appendChild(row);
-          tooFar++;
-          continue;
-        }
-      }
-    }
+    // WERYFIKACJA KODU POCZTOWEGO - akceptuj tylko 8X-XXX i 7X-XXX (region pomorski)
+    const postalCode = extractPostalCode(loc.formatted);
+    const postalPrefix = postalCode ? postalCode.substring(0, 1) : null;
+    const isSuspiciousRegion = postalPrefix && postalPrefix !== '8' && postalPrefix !== '7';
     
     if(isDuplicate(loc.lat, loc.lng) || isTextDuplicate(c.name, loc.formatted)){
       row.className = 'candidate-item fail';
       row.innerHTML = `<div><div class="candidate-name">⚠️ duplikat</div><div class="candidate-addr">${escapeHtml(loc.formatted)}</div></div>`;
-      resultBox.appendChild(row);
+      failedRows.push(row);
       duplicates++;
       continue;
     }
     const placeInfo = await resolveGooglePlace(c.name, loc.formatted, loc.lat, loc.lng, !!(loc.soft || loc.regionFallback));
-    stops.push({ id: ++stopCounter, type: 'waypoint', name: c.name || 'Odbiorca', address: loc.formatted, phone: c.phone || '', lat: loc.lat, lng: loc.lng, isEditing: false, visited: false, isCompany: placeInfo.isCompany, googlePlaceName: placeInfo.googlePlaceName, googlePlaceId: placeInfo.googlePlaceId, routeIndex: null });
+    stops.push({ 
+      id: ++stopCounter, 
+      type: 'waypoint', 
+      name: c.name || 'Odbiorca', 
+      address: loc.formatted, 
+      phone: c.phone || '', 
+      lat: loc.lat, 
+      lng: loc.lng, 
+      isEditing: false, 
+      visited: false, 
+      isCompany: placeInfo.isCompany, 
+      googlePlaceName: placeInfo.googlePlaceName, 
+      googlePlaceId: placeInfo.googlePlaceId, 
+      routeIndex: null,
+      softQuality: loc.soft || loc.regionFallback,  // Czy był niepewny (żółty/fioletowy)?
+      manuallyVerified: false  // Czy został zweryfikowany ręcznie?
+    });
     const qualityBadge = loc.regionFallback ? '🟣' : (loc.soft ? '🟡' : '✅');
     const companyBadge = placeInfo.isCompany ? ' 🏢' : '';
     if(loc.regionFallback) regionFallback++;
     else if(loc.soft) soft++;
-    row.className = loc.regionFallback ? 'candidate-item weak' : (loc.soft ? 'candidate-item warn' : 'candidate-item ok');
-    const actions = (loc.soft || loc.regionFallback) ?
-      `<div class="candidate-actions"><button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, ${JSON.stringify(c).replace(/"/g, '&quot;')})">✏️ Popraw</button></div>` : '';
-    row.innerHTML = `<div style="flex:1;"><div class="candidate-name">${qualityBadge} ${escapeHtml(c.name)}${companyBadge}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(loc.formatted)}</div></div>${actions}`;
-    resultBox.appendChild(row);
-    added++;
+    
+    // Jeśli kod pocztowy jest podejrzany (nie 7X-XXX ani 8X-XXX) - pokaż na czerwono z ostrzeżeniem
+    if(isSuspiciousRegion){
+      candidatesWithIssues.set(idx, c);
+      row.className = 'candidate-item fail';
+      row.innerHTML = `<div style="flex:1;">
+        <div class="candidate-name">⚠️ ${escapeHtml(c.name)} - INNY REGION${phoneSuffix}</div>
+        <div class="candidate-addr">${escapeHtml(loc.formatted)} <span style="color:var(--red);font-weight:700;">(kod ${postalCode} - oczekiwano 7X-XXX lub 8X-XXX)</span></div>
+        <div style="font-size:10px;color:var(--red);margin-top:4px;"><b>Punkt poza regionem pomorskim.</b> Sprawdź czy adres jest poprawny.</div>
+      </div>
+      <div class="candidate-actions">
+        <button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button>
+        <button class="btn btn-sm btn-ghost" onclick="showEditDialog(${stopCounter})">✏️ Edytuj w trasie</button>
+      </div>`;
+      suspiciousRows.push(row);
+      suspicious++;
+      added++;
+    } else {
+      row.className = loc.regionFallback ? 'candidate-item weak' : (loc.soft ? 'candidate-item warn' : 'candidate-item ok');
+      
+      // ZAWSZE dodaj przycisk edycji - użytkownik może chcieć poprawić
+      const editBtn = `<button class="btn btn-sm btn-ghost" onclick="showEditDialog(${stopCounter})">✏️ Edytuj</button>`;
+      const actions = (loc.soft || loc.regionFallback) ?
+        `<div class="candidate-actions"><button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, ${JSON.stringify(c).replace(/"/g, '&quot;')})">⚠️ Popraw</button>${editBtn}</div>` : 
+        `<div class="candidate-actions">${editBtn}</div>`;
+      row.innerHTML = `<div style="flex:1;"><div class="candidate-name">${qualityBadge} ${escapeHtml(c.name)}${companyBadge}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(loc.formatted)}</div></div>${actions}`;
+      
+      // Punkty niepewne (żółte/fioletowe) idą do uncertainRows, normalne do normalRows
+      if(loc.soft || loc.regionFallback){
+        uncertainRows.push(row);
+      } else {
+        normalRows.push(row);
+      }
+      added++;
+    }
     await sleep(150);
   }
+  
+  // Dodaj wiersze w kolejności: podejrzane (czerwone) → niepewne (żółte) → normalne (zielone) → błędy
+  suspiciousRows.forEach(r => resultBox.appendChild(r));
+  uncertainRows.forEach(r => resultBox.appendChild(r));
+  normalRows.forEach(r => resultBox.appendChild(r));
+  failedRows.forEach(r => resultBox.appendChild(r));
+  
   showProgress(false);
   if(added > 0){
     renderStops();
     updateMap();
-    switchTab('stops');
+    // Zostań w zakładce Skanuj zamiast przełączać na Trasa
+    // switchTab('stops');
   }
   let msg = `Dodano ${added}`;
+  if(suspicious > 0) msg += ` | ⚠️ ${suspicious} podejrzanych (inny region)`;
   if(duplicates > 0) msg += ` | Pominięto ${duplicates}`;
   if(failed > 0) msg += ` | Nie znaleziono ${failed}`;
-  if(tooFar > 0) msg += ` | ⚠️ ${tooFar} podejrzanych (za daleko)`;
   showToast(msg, added > 0 ? 'success' : 'error');
 }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -1998,7 +2021,19 @@ async function addStartPoint(){
   const loc = await geocodeAddress(address);
   showProgress(false);
   if(loc){
-    stops.unshift({ id: ++stopCounter, type: 'start', name: '🏠 START', address: loc.formatted, phone:'', lat: loc.lat, lng: loc.lng, isEditing:false, visited:false });
+    stops.unshift({ 
+      id: ++stopCounter, 
+      type: 'start', 
+      name: '🏠 START', 
+      address: loc.formatted, 
+      phone:'', 
+      lat: loc.lat, 
+      lng: loc.lng, 
+      isEditing:false, 
+      visited:false,
+      softQuality: false,
+      manuallyVerified: true  // Ręcznie dodany = zweryfikowany
+    });
     input.value = '';
     renderStops(); updateMap(); calculateRoute();
     showToast('Start ustawiony — klikaj pinezki na mapie, żeby ułożyć trasę');
@@ -2015,7 +2050,23 @@ async function addWaypoint(){
     if(isDuplicate(loc.lat, loc.lng) || isTextDuplicate(address.split(',')[0].slice(0,40), loc.formatted)){ showToast('Już jest na trasie', 'error'); return; }
     const wpName = address.split(',')[0].slice(0,40) || 'Punkt';
     const placeInfo = await resolveGooglePlace(wpName, loc.formatted, loc.lat, loc.lng);
-    stops.push({ id: ++stopCounter, type: 'waypoint', name: wpName, address: loc.formatted, phone:'', lat: loc.lat, lng: loc.lng, isEditing:false, visited:false, isCompany: placeInfo.isCompany, googlePlaceName: placeInfo.googlePlaceName, googlePlaceId: placeInfo.googlePlaceId, routeIndex: null });
+    stops.push({ 
+      id: ++stopCounter, 
+      type: 'waypoint', 
+      name: wpName, 
+      address: loc.formatted, 
+      phone:'', 
+      lat: loc.lat, 
+      lng: loc.lng, 
+      isEditing:false, 
+      visited:false, 
+      isCompany: placeInfo.isCompany, 
+      googlePlaceName: placeInfo.googlePlaceName, 
+      googlePlaceId: placeInfo.googlePlaceId, 
+      routeIndex: null,
+      softQuality: false,
+      manuallyVerified: true  // Ręcznie dodany = zweryfikowany
+    });
     input.value = '';
     renderStops(); updateMap();
     showToast('Dodano na mapę — kliknij pinezkę, żeby dodać do trasy');
@@ -2035,7 +2086,23 @@ async function bulkAddAddresses(){
     if(isDuplicate(loc.lat, loc.lng) || isTextDuplicate(line.split(',')[0].slice(0,40), loc.formatted)){ skipped++; continue; }
     const wpName = line.split(',')[0].slice(0,40) || 'Punkt';
     const placeInfo = await resolveGooglePlace(wpName, loc.formatted, loc.lat, loc.lng);
-    stops.push({ id: ++stopCounter, type: 'waypoint', name: wpName, address: loc.formatted, phone:'', lat: loc.lat, lng: loc.lng, isEditing:false, visited:false, isCompany: placeInfo.isCompany, googlePlaceName: placeInfo.googlePlaceName, googlePlaceId: placeInfo.googlePlaceId, routeIndex: null });
+    stops.push({ 
+      id: ++stopCounter, 
+      type: 'waypoint', 
+      name: wpName, 
+      address: loc.formatted, 
+      phone:'', 
+      lat: loc.lat, 
+      lng: loc.lng, 
+      isEditing:false, 
+      visited:false, 
+      isCompany: placeInfo.isCompany, 
+      googlePlaceName: placeInfo.googlePlaceName, 
+      googlePlaceId: placeInfo.googlePlaceId, 
+      routeIndex: null,
+      softQuality: false,
+      manuallyVerified: true  // Ręcznie dodany = zweryfikowany
+    });
     added++;
     await sleep(150);
   }
@@ -2075,8 +2142,10 @@ function applyOrder(){
       showToast('Wszystkie punkty już w trasie - przeciągaj aby zmienić kolejność'); 
       return; 
     }
+    // Sortuj według ID (kolejność dodawania) zamiast losowo
+    pending.sort((a, b) => a.id - b.id);
     pending.forEach(p => { p.routeIndex = ++nextRouteIndex; });
-    showToast(`Dodano ${pending.length} punktów do trasy`);
+    showToast(`Dodano ${pending.length} punktów do trasy (w kolejności z OCR)`);
     renderStops(); updateMap(false); calculateRoute(); saveState();
     return;
   }
@@ -2316,6 +2385,7 @@ async function saveEditDialog(){
       stop.phone = newPhone;
       stop.lat = loc.lat;
       stop.lng = loc.lng;
+      stop.manuallyVerified = true;  // Oznacz jako zweryfikowany ręcznie
       
       const placeInfo = await resolveGooglePlace(stop.name, stop.address, stop.lat, stop.lng);
       stop.isCompany = placeInfo.isCompany;
@@ -2338,11 +2408,19 @@ async function saveEditDialog(){
 function buildStopItemHtml(stop, displayIndex, options = {}){
   const { pending = false, draggable = true } = options;
   
+  // Badge jakości: jeśli był niepewny ale zweryfikowany ręcznie -> zielony, inaczej zachowaj żółty
+  let qualityBadge = '';
+  if(stop.softQuality && !stop.manuallyVerified){
+    qualityBadge = '🟡 ';  // Niepewny, NIE zweryfikowany
+  } else if(stop.softQuality && stop.manuallyVerified){
+    qualityBadge = '✅ ';  // Niepewny, ale ZWERYFIKOWANY ręcznie
+  }
+  
   return `
     <div class="stop-item${pending ? ' pending' : ''}${stop.visited ? ' visited' : ''}" data-stop-id="${stop.id}">
       <div class="stop-header">
         <div class="stop-number ${stop.type}${pending ? ' pending' : ''}">${displayIndex != null ? displayIndex : '·'}</div>
-        <div class="stop-title">${stop.isCompany ? '🏢 ' : ''}${escapeHtml(stop.name)}</div>
+        <div class="stop-title">${qualityBadge}${stop.isCompany ? '🏢 ' : ''}${escapeHtml(stop.name)}</div>
         <div class="stop-badge">${stop.type==='start'?'START':stop.type==='end'?'KONIEC':pending?'NA MAPIE':'W TRASIE'}</div>
       </div>
       <div class="stop-address">${escapeHtml(stop.address)}</div>
