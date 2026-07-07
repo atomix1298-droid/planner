@@ -1013,7 +1013,7 @@ function bindButtons(){
   });
   document.getElementById('fabClearRoute')?.addEventListener('click', clearRouteOnly);
   document.getElementById('fabClearAllRoute')?.addEventListener('click', clearAll);
-  document.getElementById('fabArrangeRoute')?.addEventListener('click', applyOrder);
+  document.getElementById('fabArrangeRoute')?.addEventListener('click', applyOrderGeo);  // Zawsze geograficznie
   document.getElementById('fabCenterMap')?.addEventListener('click', centerMapOnAllPoints);
   document.getElementById('fabOptimize')?.addEventListener('click', optimizeCurrentRoute);
   document.getElementById('fabAddStop')?.addEventListener('click', () => {
@@ -2151,32 +2151,48 @@ function applyOrder(){
   }
   
   if(orderMode === 'geo'){
-    const start = stops.find(s => s.type === 'start');
-    const end = stops.find(s => s.type === 'end');
-    
-    // Najpierw dodajemy wszystkie punkty do trasy
-    allWaypoints.forEach(p => {
-      if(p.routeIndex == null) p.routeIndex = ++nextRouteIndex;
-    });
-    
-    const scheduled = allWaypoints.filter(s => s.routeIndex != null);
-    if(scheduled.length < 1){ 
+    applyGeoOrder();
+  }
+}
+
+// Funkcja dla pływającego przycisku - zawsze geograficznie
+function applyOrderGeo(){
+  if(stops.length < 1){ showToast('Brak punktów', 'error'); return; }
+  const allWaypoints = stops.filter(s => s.type === 'waypoint' && s.lat && s.lng);
+  if(allWaypoints.length === 0){ showToast('Brak punktów na mapie', 'error'); return; }
+  applyGeoOrder();
+}
+
+// Wspólna logika optymalizacji geograficznej
+function applyGeoOrder(){
+  const allWaypoints = stops.filter(s => s.type === 'waypoint' && s.lat && s.lng);
+  const start = stops.find(s => s.type === 'start');
+  const end = stops.find(s => s.type === 'end');
+  
+  // Punkty już w trasie (ręcznie ułożone) - NIE RUSZAJ ICH!
+  const alreadyInRoute = allWaypoints.filter(p => p.routeIndex != null).sort((a, b) => a.routeIndex - b.routeIndex);
+  
+  // Punkty z mapki (pending) - te będą optymalizowane
+  const pending = allWaypoints.filter(p => p.routeIndex == null);
+  
+  if(pending.length === 0){
+    // Wszystkie punkty już w trasie - zoptymalizuj je wszystkie od nowa
+    if(alreadyInRoute.length === 0){
       showToast('Brak punktów do optymalizacji', 'error'); 
-      return; 
+      return;
     }
     
-    const visited = scheduled.filter(s => s.visited);
-    let remaining = scheduled.filter(s => !s.visited);
+    // Stara logika - optymalizuj wszystkie punkty
+    const visited = alreadyInRoute.filter(s => s.visited);
+    let remaining = alreadyInRoute.filter(s => !s.visited);
     const ordered = [...visited];
     
-    // NOWE: Sortujemy remaining według routeIndex i bierzemy pierwszy (zaznaczony przez usera)
     remaining.sort((a, b) => a.routeIndex - b.routeIndex);
     
     let cursor = null;
     if(start) {
       cursor = start;
     } else if(remaining.length > 0) {
-      // Pierwszy punkt w trasie (najniższy routeIndex) staje się punktem startowym
       cursor = remaining[0];
       ordered.push(remaining.shift());
     } else if(ordered.length > 0) {
@@ -2197,6 +2213,44 @@ function applyOrder(){
     ordered.forEach((s, i) => { s.routeIndex = i + 1; });
     nextRouteIndex = ordered.length;
     showToast(`Trasa zoptymalizowana od punktu "${ordered[0].name}" (${ordered.length} punktów)`);
+  } else {
+    // NOWA LOGIKA: Są punkty pending - dodaj je po ostatnim punkcie w trasie
+    
+    // Zachowaj punkty które już są w trasie
+    const ordered = [...alreadyInRoute];
+    
+    // Znajdź punkt startowy dla optymalizacji pending
+    let cursor = null;
+    let remaining = [...pending];
+    
+    if(ordered.length > 0){
+      // Startuj od ostatniego punktu w trasie
+      cursor = ordered[ordered.length - 1];
+    } else if(start){
+      // Jeśli nie ma punktów w trasie, startuj od punktu START
+      cursor = start;
+    } else {
+      // Jeśli nie ma ani punktów w trasie ani START, weź pierwszy pending
+      cursor = remaining[0];
+      cursor.routeIndex = ++nextRouteIndex;
+      ordered.push(cursor);
+      remaining.shift();
+    }
+    
+    // Optymalizuj pozostałe pending punkty geograficznie
+    while(remaining.length > 0){
+      let nearest = remaining[0], nearestDist = haversine(cursor, nearest);
+      for(let i = 1; i < remaining.length; i++){
+        const d = haversine(cursor, remaining[i]);
+        if(d < nearestDist){ nearestDist = d; nearest = remaining[i]; }
+      }
+      nearest.routeIndex = ++nextRouteIndex;
+      ordered.push(nearest);
+      cursor = nearest;
+      remaining = remaining.filter(r => r !== nearest);
+    }
+    
+    showToast(`Dodano ${pending.length} punktów do trasy (od punktu "${ordered[alreadyInRoute.length > 0 ? alreadyInRoute.length - 1 : 0].name}")`);
   }
   
   renderStops(); updateMap(false); calculateRoute(); saveState();
