@@ -1598,19 +1598,46 @@ async function geocodeGoogle(rawAddress){
       // Sprawdź kod pocztowy
       if(expectedPostal){
         const gotPostal = extractPostalCode(place.formatted_address);
-        if(gotPostal && gotPostal === expectedPostal){
-          // Kod pocztowy się zgadza - zwróć wynik
-          return { 
-            formatted: place.formatted_address, 
-            lat: place.geometry.location.lat, 
-            lng: place.geometry.location.lng,
-            soft: false
-          };
-        } else {
-          // Kod pocztowy się nie zgadza - spróbuj auto-fix
-          console.log(`⚠️ Pierwsza próba: kod pocztowy się nie zgadza (oczekiwano ${expectedPostal}, dostano ${gotPostal}) - próbuję auto-fix`);
-          // Nie zwracaj null - idź dalej do auto-fix
+        if(gotPostal && gotPostal !== expectedPostal){
+          // Kod pocztowy się nie zgadza - spróbuj z samą ulicą + kodem pocztowym
+          console.log(`⚠️ Kod pocztowy się nie zgadza: oczekiwano ${expectedPostal}, dostano ${gotPostal} - próbuję tylko ulica + kod`);
+          
+          const street = extractStreetWithNumber(address);
+          if(street){
+            const simpleQuery = `${street}, ${expectedPostal}, Polska`;
+            console.log(`🔧 Próbuję: "${simpleQuery}"`);
+            
+            const simpleUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(simpleQuery)}&key=${GOOGLE_API_KEY}&language=pl&region=pl`;
+            const simpleRes = await fetch(simpleUrl);
+            const simpleData = await simpleRes.json();
+            incrementApiUsage('geocoding');
+            
+            if(simpleData.status === 'OK' && simpleData.results.length > 0){
+              const simplePlace = simpleData.results[0];
+              const simplePostal = extractPostalCode(simplePlace.formatted_address);
+              if(simplePostal && simplePostal === expectedPostal){
+                console.log(`✅ Znaleziono z ulica + kod: "${simplePlace.formatted_address}"`);
+                return { 
+                  formatted: simplePlace.formatted_address, 
+                  lat: simplePlace.geometry.location.lat, 
+                  lng: simplePlace.geometry.location.lng,
+                  soft: false
+                };
+              }
+            }
+          }
+          
+          // Jeśli nadal się nie zgadza - odrzuć
+          return null;
         }
+        
+        // Kod pocztowy się zgadza - zwróć wynik
+        return { 
+          formatted: place.formatted_address, 
+          lat: place.geometry.location.lat, 
+          lng: place.geometry.location.lng,
+          soft: false
+        };
       } else {
         // Brak oczekiwanego kodu pocztowego - zwróć wynik
         return { 
@@ -1624,6 +1651,119 @@ async function geocodeGoogle(rawAddress){
     
     // Jeśli nie znaleziono - spróbuj naprawić częste błędy OCR w nazwie ulicy
     if(data.status === 'ZERO_RESULTS'){
+      // PRIORYTET 0: Spróbuj najpierw tylko ulica + kod pocztowy (bez miasta)
+      // To rozwiązuje problem gdy miasto jest błędne (np. "ELBLĄG BRONOWO GÓRNE" zamiast "Gronowo Górne")
+      if(expectedPostal){
+        const street = extractStreetWithNumber(address);
+        if(street){
+          // STRATEGIA 1: ulica + kod (bez miasta)
+          const simpleQuery = `${street}, ${expectedPostal}, Polska`;
+          console.log(`🔧 Próbuję najpierw ulica + kod (bez miasta): "${simpleQuery}"`);
+          
+          const simpleUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(simpleQuery)}&key=${GOOGLE_API_KEY}&language=pl&region=pl`;
+          const simpleRes = await fetch(simpleUrl);
+          const simpleData = await simpleRes.json();
+          incrementApiUsage('geocoding');
+          
+          if(simpleData.status === 'OK' && simpleData.results.length > 0){
+            const simplePlace = simpleData.results[0];
+            const simplePostal = extractPostalCode(simplePlace.formatted_address);
+            if(simplePostal && simplePostal === expectedPostal){
+              console.log(`✅ Znaleziono z ulica + kod: "${simplePlace.formatted_address}"`);
+              return { 
+                formatted: simplePlace.formatted_address, 
+                lat: simplePlace.geometry.location.lat, 
+                lng: simplePlace.geometry.location.lng,
+                soft: false
+              };
+            }
+          }
+          
+          // STRATEGIA 2: ulica + miasto z OCR + kod (jeśli Google nie znalazł bez miasta)
+          // Wyciągnij nazwę miasta z oryginalnego adresu (fragment po przecinku przed kodem)
+          const cityMatch = address.match(/,\s*([^,]+?)\s*,?\s*\d{5}$/);
+          if(cityMatch){
+            const cityFromOCR = cityMatch[1].trim();
+            const withCityQuery = `${street}, ${cityFromOCR}, ${expectedPostal}, Polska`;
+            console.log(`🔧 Próbuję z miastem z OCR: "${withCityQuery}"`);
+            
+            const withCityUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(withCityQuery)}&key=${GOOGLE_API_KEY}&language=pl&region=pl`;
+            const withCityRes = await fetch(withCityUrl);
+            const withCityData = await withCityRes.json();
+            incrementApiUsage('geocoding');
+            
+            if(withCityData.status === 'OK' && withCityData.results.length > 0){
+              const cityPlace = withCityData.results[0];
+              const cityPostal = extractPostalCode(cityPlace.formatted_address);
+              if(cityPostal && cityPostal === expectedPostal){
+                console.log(`✅ Znaleziono z ulica + miasto + kod: "${cityPlace.formatted_address}"`);
+                return { 
+                  formatted: cityPlace.formatted_address, 
+                  lat: cityPlace.geometry.location.lat, 
+                  lng: cityPlace.geometry.location.lng,
+                  soft: false
+                };
+              }
+            }
+          }
+          
+          // STRATEGIA 3: OCR często pomija ostatnią cyfrę (82300 → 82-300 zamiast 82-310)
+          // Jeśli expectedPostal kończy się na "0" (np. 82-300), spróbuj też wariant "10" (82-310)
+          if(expectedPostal && expectedPostal.endsWith('00')){
+            const altPostal = expectedPostal.slice(0, -2) + '10';
+            console.log(`🔧 OCR mógł pomylić kod: próbuję "${altPostal}" zamiast "${expectedPostal}"`);
+            
+            // Spróbuj najpierw z ulica + alternatywny kod
+            const altQuery = `${street}, ${altPostal}, Polska`;
+            const altUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(altQuery)}&key=${GOOGLE_API_KEY}&language=pl&region=pl`;
+            const altRes = await fetch(altUrl);
+            const altData = await altRes.json();
+            incrementApiUsage('geocoding');
+            
+            if(altData.status === 'OK' && altData.results.length > 0){
+              const altPlace = altData.results[0];
+              const altFoundPostal = extractPostalCode(altPlace.formatted_address);
+              if(altFoundPostal && altFoundPostal === altPostal){
+                console.log(`✅ Znaleziono z poprawionym kodem ${altPostal}: "${altPlace.formatted_address}"`);
+                return { 
+                  formatted: altPlace.formatted_address, 
+                  lat: altPlace.geometry.location.lat, 
+                  lng: altPlace.geometry.location.lng,
+                  soft: false
+                };
+              }
+            }
+            
+            // Jeśli nie znalazł, spróbuj z miastem z OCR + alternatywny kod
+            if(cityMatch){
+              const cityFromOCR = cityMatch[1].trim();
+              const altCityQuery = `${street}, ${cityFromOCR}, ${altPostal}, Polska`;
+              console.log(`🔧 Próbuję z miastem + poprawiony kod: "${altCityQuery}"`);
+              
+              const altCityUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(altCityQuery)}&key=${GOOGLE_API_KEY}&language=pl&region=pl`;
+              const altCityRes = await fetch(altCityUrl);
+              const altCityData = await altCityRes.json();
+              incrementApiUsage('geocoding');
+              
+              if(altCityData.status === 'OK' && altCityData.results.length > 0){
+                const altCityPlace = altCityData.results[0];
+                const altCityPostal = extractPostalCode(altCityPlace.formatted_address);
+                if(altCityPostal && altCityPostal === altPostal){
+                  console.log(`✅ Znaleziono z miastem + poprawiony kod ${altPostal}: "${altCityPlace.formatted_address}"`);
+                  return { 
+                    formatted: altCityPlace.formatted_address, 
+                    lat: altCityPlace.geometry.location.lat, 
+                    lng: altCityPlace.geometry.location.lng,
+                    soft: false
+                  };
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      // Jeśli nie zadziałało - spróbuj auto-fix z zamianą liter
       const fixes = [];
       
       // PRIORYTET 1: Jeśli adres zawiera numer z "/" (80/82) - spróbuj NAJPIERW tylko pierwszy numer
