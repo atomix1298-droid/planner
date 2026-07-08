@@ -329,7 +329,7 @@
     </div>
   </div>
   <div class="header-details" id="headerDetails">
-    <div class="sub">OCR Tesseract → mapa → nawigacja → chmura</div>
+    <div class="sub">OCR (Vision/Tesseract) → mapa → nawigacja → chmura</div>
     <div class="sub" id="cloudStatus">☁️ Łączenie...</div>
     <div class="sub">🧑‍✈️ <span id="courierNameDisplay">—</span> <a href="#" id="btnChangeCourier" style="color:#cfe0ff;text-decoration:underline;">(zmień)</a></div>
     <div class="sub" id="apiUsageBar" style="font-size:10px;">📊 —</div>
@@ -502,6 +502,20 @@
         <input type="file" id="fileInputGallery" accept="image/*" multiple hidden>
 
         <div id="fileChipList" class="file-chip-list"></div>
+        
+        <div style="margin:16px 0; padding:12px; background:linear-gradient(135deg, #f8f9fc 0%, #e9ecef 100%); border-radius:8px; border-left:4px solid var(--blue);">
+          <div style="font-weight:600; margin-bottom:8px; color:var(--ink);">🔍 Wybierz tryb OCR (typ zdjęcia):</div>
+          <label style="display:block; margin-bottom:8px; cursor:pointer; padding:8px; background:#fff; border-radius:6px; border:2px solid var(--green);">
+            <input type="radio" name="ocrMode" value="vision" checked style="margin-right:8px;">
+            <b style="color:var(--green);">📄 Google Vision</b> - zdjęcie TELEFONU z kartki papierowej (listy przewozowe SUS, GEIS)
+            <div style="font-size:10px; color:var(--ink-soft); margin-left:24px; margin-top:4px;">Użyj gdy robisz zdjęcie aparatem/telefonem papierowego dokumentu</div>
+          </label>
+          <label style="display:block; cursor:pointer; padding:8px; background:#fff; border-radius:6px; border:2px solid var(--purple);">
+            <input type="radio" name="ocrMode" value="tesseract" style="margin-right:8px;">
+            <b style="color:var(--purple);">📱 Tesseract.js</b> - screenshot z APLIKACJI GEIS (wyeksportowane z systemu)
+            <div style="font-size:10px; color:var(--ink-soft); margin-left:24px; margin-top:4px;">Użyj gdy masz gotowy obraz/PDF wyeksportowany z aplikacji GEIS</div>
+          </label>
+        </div>
 
         <button class="btn btn-block" id="btnProcessFiles" disabled>🔍 Rozpoznaj odbiorców</button>
 
@@ -533,7 +547,7 @@
         </div>
         <div class="checkbox-group">
           <input type="checkbox" id="includeNameInMaps" checked>
-          <label for="includeNameInMaps">Doklejaj nazwę firmy do adresu w nawigacji <span style="color:#e74c3c;font-weight:700;">⚠️ JEŻELI MAPA SIĘ NIE WŁĄCZA - WYŁĄCZ TĘ OPCJĘ!</span></label>
+          <label for="includeNameInMaps">Doklejaj nazwę firmy do adresu w nawigacji <span style="color:#27ae60;font-weight:700;">✅ Google weryfikuje nazwy - działa na telefonie!</span></label>
         </div>
         <div class="checkbox-group">
           <input type="checkbox" id="companyDetection" checked>
@@ -1188,24 +1202,57 @@ function renderFileChips(){
 }
 
 /* OCR */
-async function ocrImage(file){
-  // Tesseract.js - lepsze zachowanie struktury linii
+function fileToBase64(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function ocrImageVision(file){
+  // Google Vision API - lepsze dla zdjęć z kartki (SUS, GEIS papier)
+  const base64Data = await fileToBase64(file);
+  const url = `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_API_KEY}`;
+  const payload = { requests: [{ image: { content: base64Data }, features: [{ type: "TEXT_DETECTION" }] }] };
+  const res = await fetch(url, { method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json' } });
+  const data = await res.json();
+  incrementApiUsage('vision');
+  if(data.error) throw new Error(data.error.message);
+  const ann = data.responses && data.responses[0] && data.responses[0].textAnnotations;
+  return ann && ann[0] ? ann[0].description : '';
+}
+
+async function ocrImageTesseract(file){
+  // Tesseract.js - lepsze dla screenshotów z aplikacji GEIS (cyfrowe obrazki)
   const result = await Tesseract.recognize(
     file,
-    'pol+eng', // Polski + angielski
+    'pol+eng',
     {
       logger: m => {
         if(m.status === 'recognizing text'){
-          showProgress(true, 'OCR...', `${Math.round(m.progress * 100)}%`);
+          showProgress(true, 'OCR Tesseract...', `${Math.round(m.progress * 100)}%`);
         }
       }
     }
   );
   return result.data.text || '';
 }
+
+async function ocrImage(file){
+  // Wybierz tryb OCR na podstawie radio buttonów
+  const mode = document.querySelector('input[name="ocrMode"]:checked')?.value || 'vision';
+  
+  if(mode === 'tesseract'){
+    return await ocrImageTesseract(file);
+  } else {
+    return await ocrImageVision(file);
+  }
+}
 async function processAllFiles(){
   if(pendingFiles.length === 0) return;
-  showProgress(true, '📥 Pobieranie modelu OCR...', 'Po raz pierwszy - to chwilę potrwa');
+  showProgress(true, 'Rozpoznawanie...', `1 / ${pendingFiles.length}`);
   let combinedText = ''; let failed = 0;
   for(let i = 0; i < pendingFiles.length; i++){
     showProgress(true, 'OCR...', `${i+1}/${pendingFiles.length}`);
@@ -1233,6 +1280,12 @@ function detectDominantRegion(text){
 function cleanAddress(addr){
   if(!addr) return addr;
   let s = addr;
+  
+  // NAJPIERW napraw częste błędy OCR w nazwach ulic
+  s = s.replace(/\bŚw\.\s*arzewsk/gi, 'Swarzewsk'); // Swarzewska → błędnie czytana jako "Św. arzewska"
+  s = s.replace(/\bSw\.\s*arzewsk/gi, 'Swarzewsk');
+  
+  // Potem ogólne poprawki
   s = s.replace(/\bPolika\b/gi, 'Polska');
   s = s.replace(/\bPoiska\b/gi, 'Polska');
   s = s.replace(/\bPoisk[ae]\b/gi, 'Polska');
@@ -1492,35 +1545,126 @@ function extractCandidatesFromText(text){
 async function geocodeGoogle(rawAddress){
   const address = cleanAddress(rawAddress);
   const expectedPostal = extractPostalCode(address);
+  
+  console.log(`📍 Geokodowanie: "${rawAddress}" → "${address}" (oczekiwany kod: ${expectedPostal})`);
+  
+  // Spróbuj najpierw z oryginalnym adresem
   let url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_API_KEY}&language=pl&region=pl`;
   if(expectedPostal) url += `&components=country:PL|postal_code:${encodeURIComponent(expectedPostal)}`;
+  
   try{
     const res = await fetch(url);
     const data = await res.json();
     incrementApiUsage('geocoding');
+    
+    console.log(`📍 Google Geocoding status: ${data.status}`);
+    
     if(data.status === 'OK' && data.results.length > 0){
       const place = data.results[0];
       if(place.types.includes('country')) return null;
+      
+      // Sprawdź kod pocztowy
       if(expectedPostal){
         const gotPostal = extractPostalCode(place.formatted_address);
-        if(!gotPostal || gotPostal !== expectedPostal) return null;
+        if(gotPostal && gotPostal === expectedPostal){
+          // Kod pocztowy się zgadza - zwróć wynik
+          return { 
+            formatted: place.formatted_address, 
+            lat: place.geometry.location.lat, 
+            lng: place.geometry.location.lng,
+            soft: false
+          };
+        } else {
+          // Kod pocztowy się nie zgadza - spróbuj auto-fix
+          console.log(`⚠️ Pierwsza próba: kod pocztowy się nie zgadza (oczekiwano ${expectedPostal}, dostano ${gotPostal}) - próbuję auto-fix`);
+          // Nie zwracaj null - idź dalej do auto-fix
+        }
+      } else {
+        // Brak oczekiwanego kodu pocztowego - zwróć wynik
+        return { 
+          formatted: place.formatted_address, 
+          lat: place.geometry.location.lat, 
+          lng: place.geometry.location.lng,
+          soft: false
+        };
       }
-      // Skracamy adres Google - usuwamy województwo, powiat, dzielnice
-      let shortAddr = place.formatted_address
-        .replace(/,\s*województwo\s+[^,]+/gi, '')
-        .replace(/,\s*powiat\s+[^,]+/gi, '')
-        .replace(/,\s*gmina\s+[^,]+/gi, '')
-        .replace(/,\s*Osiedle\s+[^,]+/gi, '')
-        .replace(/,\s*Śródmieście/gi, '')
-        .replace(/,\s*Polska\s*$/i, '')
-        .replace(/,\s*,/g, ',')
-        .trim();
-      return { lat: place.geometry.location.lat, lng: place.geometry.location.lng, formatted: shortAddr, postal: extractPostalCode(shortAddr) };
     }
-  }catch(e){
-    console.error('geocodeGoogle error:', e);
+    
+    // Jeśli nie znaleziono - spróbuj naprawić częste błędy OCR w nazwie ulicy
+    if(data.status === 'ZERO_RESULTS'){
+      const fixes = [];
+      
+      // PRIORYTET 1: Jeśli adres zawiera numer z "/" (80/82) - spróbuj NAJPIERW tylko pierwszy numer
+      const slashMatch = address.match(/^([^,]+?)(\s+)(\d+)\/(\d+)(.*)/);
+      if(slashMatch){
+        const streetName = slashMatch[1].trim();
+        const firstNumber = slashMatch[3];
+        const restOfAddress = slashMatch[5];
+        const fixedAddress = `${streetName} ${firstNumber}${restOfAddress}`;
+        fixes.push({ address: fixedAddress, reason: `numer "/" (${slashMatch[3]}/${slashMatch[4]} → ${firstNumber})` });
+      }
+      
+      // PRIORYTET 2: Wyciągnij nazwę ulicy (przed pierwszym numerem) i spróbuj zamienić l↔1, O↔0
+      const streetMatch = address.match(/^([^,]+?)(\s+\d+)/);
+      if(streetMatch){
+        const streetName = streetMatch[1].trim();
+        const restOfAddress = address.substring(streetMatch.index + streetMatch[1].length);
+        
+        // Spróbuj zamienić l↔1, O↔0
+        const variations = [
+          { str: streetName.replace(/l/gi, '1'), reason: 'l→1' },
+          { str: streetName.replace(/1/g, 'l'), reason: '1→l' },
+          { str: streetName.replace(/O/g, '0'), reason: 'O→0' },
+          { str: streetName.replace(/0/g, 'O'), reason: '0→O' }
+        ];
+        
+        for(const v of variations){
+          if(v.str !== streetName){
+            fixes.push({ address: v.str + restOfAddress, reason: v.reason });
+          }
+        }
+      }
+      
+      // Spróbuj wszystkie poprawki
+      for(const fix of fixes){
+        console.log(`🔧 Próbuję poprawić (${fix.reason}): "${address}" → "${fix.address}"`);
+        
+        let fixUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(fix.address)}&key=${GOOGLE_API_KEY}&language=pl&region=pl`;
+        if(expectedPostal) fixUrl += `&components=country:PL|postal_code:${encodeURIComponent(expectedPostal)}`;
+        
+        const fixRes = await fetch(fixUrl);
+        const fixData = await fixRes.json();
+        incrementApiUsage('geocoding');
+        
+        if(fixData.status === 'OK' && fixData.results.length > 0){
+          const place = fixData.results[0];
+          if(!place.types.includes('country')){
+            // Sprawdź czy kod pocztowy się zgadza
+            if(expectedPostal){
+              const gotPostal = extractPostalCode(place.formatted_address);
+              if(gotPostal && gotPostal !== expectedPostal){
+                console.log(`⚠️ Kod pocztowy się nie zgadza: oczekiwano ${expectedPostal}, dostano ${gotPostal}`);
+                continue; // Spróbuj kolejną poprawkę
+              }
+            }
+            
+            console.log(`✅ Poprawiono (${fix.reason}): "${address}" → "${fix.address}"`);
+            return { 
+              formatted: place.formatted_address, 
+              lat: place.geometry.location.lat, 
+              lng: place.geometry.location.lng,
+              soft: true // Oznacz jako niepewny (bo był poprawiany)
+            };
+          }
+        }
+      }
+    }
+    
+    return null;
+  } catch(err){
+    console.error('Geocode error:', err);
+    return null;
   }
-  return null;
 }
 /* Nominatim zwraca surowy "display_name" — bardzo długi, z województwem/powiatem/dzielnicą,
    i czasem w odwróconej kolejności (numer przed ulicą). To właśnie powodowało duplikaty typu
@@ -1682,7 +1826,7 @@ const POLISH_FIRST_NAMES = new Set([
   'zbigniew','zbigniewa','henryk','henryka','kazimierz','kazimierza','roman','romana','dariusz','dariusza','mariusz','mariusza','sebastian','sebastiana',
   'rafal','rafał','rafala','rafała','artur','artura','robert','roberta','jacek','jacka','jaroslaw','jarosław','jaroslawa','jarosława','przemyslaw','przemysław',
   'przemyslawa','przemysława','waldemar','waldemara','leszek','leszka','dawid','dawida','kamil','kamila','damian','damiana','patryk','patryka','mateusz','mateusza',
-  'bartlomiej','bartłomiej','bartlomieja','bartłomieja','maciej','macieja','filip','filipa','norbert','norberta','adrian','adriana','wiktor','wiktora','igor','igora',
+  'bartlomiej','bartłomiej','bartlomieja','bartłomieja','bartosz','bartosza','maciej','macieja','filip','filipa','norbert','norberta','adrian','adriana','wiktor','wiktora','igor','igora',
   'bruno','antoni','antoniego','franciszek','franciszka','leon','leona','ignacy','ignacego','emil','emila','nikodem','nikodema','aleksander','aleksandra','miłosz','milosz','miłosza','milosza',
   'hubert','huberta','kajetan','kajetana','sylwester','sylwestra','radosław','radoslaw','radosława','radoslawa','szymon','szymona','bogdan','bogdana','edward','edwarda',
   'eugeniusz','eugeniusza','feliks','feliksa','gustaw','gustawa','ireneusz','ireneusza','konrad','konrada','leon','marian','mariana','mieczysław','mieczyslaw','mieczysława','mieczyslawa',
@@ -1693,7 +1837,7 @@ const POLISH_FIRST_NAMES = new Set([
   'natalia','natalii','paulina','pauliny','magdalena','magdaleny','izabela','izabeli','ewelina','eweliny','karolina','karoliny','teresa','teresy','joanna','joanny',
   'monika','moniki','irena','ireny','wioletta','wioletty','edyta','edyty','patrycja','patrycji','oliwia','oliwii','wiktoria','wiktorii','zuzanna','zuzanny','maja','mai',
   'lena','leny','hanna','hanny','nikola','nikoli','amelia','amelii','antonina','antoniny','helena','heleny','janina','janiny','stefania','stefanii','jolanta','jolanty',
-  'celina','celiny','marzena','marzeny','bogumila','bogumiła','bogumily','bogumiły','krystian','krystiana','dominik','dominika','oskar','oskara','kacper','kacpra','olaf','olafa'
+  'celina','celiny','marzena','marzeny','sabina','sabiny','bogumila','bogumiła','bogumily','bogumiły','krystian','krystiana','dominik','dominika','oskar','oskara','kacper','kacpra','olaf','olafa'
 ]);
 function looksLikePersonName(name){
   if(!name) return false;
@@ -1887,10 +2031,66 @@ function initBottomSheet(){
   if(isMobile()) setOpen(false, false);
   sheetApi = { snapTo: (name) => setOpen(name !== 'collapsed'), show: () => setOpen(true), hide: () => setOpen(false) };
 }
-function resolveGooglePlace(name, address, lat, lng){
+async function resolveGooglePlace(name, address, lat, lng){
   const cb = document.getElementById('companyDetection');
   if(cb && !cb.checked) return { isCompany: false, googlePlaceName: null, googlePlaceId: null };
-  return { isCompany: !looksLikePersonName(name), googlePlaceName: null, googlePlaceId: null };
+  
+  // Najpierw sprawdź heurystycznie czy to firma czy osoba
+  const isCompany = !looksLikePersonName(name);
+  
+  if(!isCompany){
+    // To osoba prywatna - nie szukaj w Google Places
+    return { isCompany: false, googlePlaceName: null, googlePlaceId: null };
+  }
+  
+  // To firma - spróbuj znaleźć oficjalną nazwę w Google Places przez GEOCODING API
+  // Geocoding zwraca place_id i formatted_address - potem możemy wyciągnąć nazwę z results
+  try {
+    const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_API_KEY}&language=pl&result_type=point_of_interest|establishment`;
+    
+    const res = await fetch(geocodeUrl);
+    const data = await res.json();
+    
+    if(data.status === 'OK' && data.results && data.results.length > 0){
+      // Szukamy POI (Point of Interest) lub Establishment w promieniu 50m
+      for(const result of data.results){
+        // Sprawdź czy to punkt zainteresowania (firma, sklep, restauracja)
+        if(result.types.includes('point_of_interest') || result.types.includes('establishment')){
+          // Wyciągnij nazwę z address_components (pierwszy component to zazwyczaj nazwa firmy)
+          const nameComponent = result.address_components.find(comp => 
+            comp.types.includes('establishment') || comp.types.includes('point_of_interest')
+          );
+          
+          if(nameComponent){
+            const googleName = nameComponent.long_name;
+            console.log(`✅ Google Places: "${name}" → "${googleName}"`);
+            return { 
+              isCompany: true, 
+              googlePlaceName: googleName, 
+              googlePlaceId: result.place_id 
+            };
+          }
+          
+          // Fallback: użyj formatted_address jako nazwy (jeśli zawiera nazwę firmy)
+          const formattedParts = result.formatted_address.split(',');
+          if(formattedParts.length > 0 && formattedParts[0].length < 50){
+            console.log(`✅ Google Places (formatted): "${name}" → "${formattedParts[0]}"`);
+            return { 
+              isCompany: true, 
+              googlePlaceName: formattedParts[0].trim(), 
+              googlePlaceId: result.place_id 
+            };
+          }
+        }
+      }
+    }
+  } catch(e){
+    console.error('Places API error:', e);
+  }
+  
+  // Nie znaleziono w Google Places - użyj nazwy z OCR
+  console.log(`⚠️ Google Places: "${name}" nie znaleziono - użyję nazwy z OCR`);
+  return { isCompany: true, googlePlaceName: null, googlePlaceId: null };
 }
 function wordsOf(text){
   const ascii = (text || '').toLowerCase()
@@ -1899,12 +2099,64 @@ function wordsOf(text){
   return ascii.match(/[a-z0-9]+/g) || [];
 }
 function getMapsQueryForStop(stop, includeName){
-  if(includeName && stop.isCompany && stop.name){
+  // Dodaj nazwę tylko jeśli to firma (NIE osoba prywatna)
+  if(includeName && stop.name){
     const nameClean = cleanRecipientName(stop.name);
+    
+    // PRIORYTET 1: Użyj oficjalnej nazwy z Google Places jeśli jest dostępna
+    if(stop.googlePlaceName){
+      return `${stop.googlePlaceName}, ${stop.address}`;
+    }
+    
+    // PRIORYTET 2: Sprawdź czy to firma - charakterystyczne cechy:
+    const words = nameClean.split(/\s+/).filter(Boolean);
+    
+    // 1. Tylko jedno słowo (np. "Mango", "Kebab") = prawdopodobnie firma
+    if(words.length === 1){
+      return `${nameClean}, ${stop.address}`;
+    }
+    
+    // 2. Ma cyfry = firma (np. "040 100 Sylwia", "DOM HANDLOWY 123")
+    if(/\d/.test(nameClean)){
+      return `${nameClean}, ${stop.address}`;
+    }
+    
+    // 3. Ma znaki specjalne firmowe: -, ", &, ()
+    if(/[-"&()]/.test(nameClean)){
+      return `${nameClean}, ${stop.address}`;
+    }
+    
+    // 4. Zawiera słowa firmowe
+    const companyKeywords = /\b(SKLEP|MARKET|MAGAZYN|STOISKO|PSZCZÓŁKA|KORPORACJA|DOM\s+HANDLOWY|HANDLOWY|BUDOWLAN|LOGISTICS|LPP|KORTALS|POLFARM|MULTIPLAST)\b/i;
+    if(companyKeywords.test(nameClean)){
+      return `${nameClean}, ${stop.address}`;
+    }
+    
+    // 5. Wszystkie wielkie litery (min 2 słowa) = firma (np. "NADBAŁTYCKA 3")
+    if(words.length >= 2 && nameClean === nameClean.toUpperCase()){
+      return `${nameClean}, ${stop.address}`;
+    }
+    
+    // 6. Ma sufiks prawny (sp. z o.o., S.A.)
+    if(looksLikeCompanyName(nameClean)){
+      return `${nameClean}, ${stop.address}`;
+    }
+    
+    // Jeśli żadne z powyższych - sprawdź czy to OSOBA (imię + nazwisko)
+    // Tylko jeśli ma 2-3 słowa i pierwsze słowo jest w bazie polskich imion
+    if(words.length >= 2 && words.length <= 3){
+      const hasPolishName = words.some(w => POLISH_FIRST_NAMES.has(normalizeForDedupe(w)));
+      const hasLastName = words.length >= 2 && words[1].length >= 3 && /^[A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ]/.test(words[1]);
+      
+      if(hasPolishName && hasLastName){
+        // To osoba - NIE dodawaj nazwy
+        return stop.address;
+      }
+    }
+    
+    // Domyślnie: jeśli nie rozpoznano jako osoba - traktuj jako firmę
     const nameWords = wordsOf(nameClean);
     const addrWords = new Set(wordsOf(stop.address));
-    // Jeśli WSZYSTKIE słowa z nazwy już występują w adresie (niezależnie od kolejności),
-    // to doklejenie jej tylko zdublowałoby tekst (np. gdy nazwa = fragment ulicy z adresu).
     const alreadyInAddress = nameWords.length > 0 && nameWords.every(w => addrWords.has(w));
     if(nameWords.length > 0 && !alreadyInAddress){
       return `${nameClean}, ${stop.address}`;
@@ -1931,7 +2183,30 @@ function normalizeForDedupe(s){
 }
 function isTextDuplicate(name, address){
   const key = normalizeForDedupe(name) + '|' + normalizeForDedupe(address);
-  return stops.some(s => (normalizeForDedupe(s.name) + '|' + normalizeForDedupe(s.address)) === key);
+  
+  // Sprawdź dokładny duplikat (nazwa + adres)
+  if(stops.some(s => (normalizeForDedupe(s.name) + '|' + normalizeForDedupe(s.address)) === key)){
+    return true;
+  }
+  
+  // Sprawdź czy ta sama ulica + TEN SAM numer domu
+  const extractStreetAndNumber = (addr) => {
+    const normalized = normalizeForDedupe(addr);
+    // Wyciągnij nazwę ulicy + numer (np. "zwirowa12", "portowa22")
+    const match = normalized.match(/^([a-z]+\d+)/);
+    return match ? match[1] : null;
+  };
+  
+  const streetNum = extractStreetAndNumber(address);
+  if(streetNum && streetNum.length > 5){
+    // Sprawdź czy już jest punkt z tą samą ulicą + numerem
+    return stops.some(s => {
+      const existingStreetNum = extractStreetAndNumber(s.address);
+      return existingStreetNum === streetNum;
+    });
+  }
+  
+  return false;
 }
 
 /* Dialog poprawiania */
@@ -1992,7 +2267,33 @@ async function acceptFixDialog(){
 /* Główny przebieg */
 async function extractAndGeocode(text){
   showProgress(true, 'Szukam odbiorców...', '');
-  const candidates = extractCandidatesFromText(text);
+  
+  // PRE-PROCESSING: Napraw częste błędy OCR PRZED parsowaniem
+  let cleanedText = text;
+  
+  // Częste błędy OCR w nazwach ulic
+  cleanedText = cleanedText.replace(/\bŚw\.\s*arzewsk/gi, 'Swarzewsk'); // Św. arzewska → Swarzewska
+  cleanedText = cleanedText.replace(/\bSw\.\s*arzewsk/gi, 'Swarzewsk');
+  cleanedText = cleanedText.replace(/\bŚw\.\s*([A-ZĄĆĘŁŃÓŚŹŻ])/g, 'Św. $1'); // Św. Jan → Św. Jan (popraw spacing)
+  
+  // Numery domów z "i" (80 i 82 → 80/82)
+  cleanedText = cleanedText.replace(/(\d+)\s+i\s+(\d+)/g, '$1/$2'); // "80 i 82" → "80/82"
+  
+  // Częste literówki OCR
+  cleanedText = cleanedText.replace(/\b0(?=\d)/g, 'O'); // 0lawa → Oława, 0strów → Ostrów
+  cleanedText = cleanedText.replace(/\bl(?=\s*\d{2,})/gi, '1'); // l23 → 123 (l jako 1 przy numerach)
+  cleanedText = cleanedText.replace(/\bGrunwa1dzka\b/gi, 'Grunwaldzka'); // 1 → l
+  cleanedText = cleanedText.replace(/\bKró1ewska\b/gi, 'Królewska');
+  cleanedText = cleanedText.replace(/\bPolna\s*l\s*\d/gi, (m) => m.replace('l', '')); // Polna l 23 → Polna 23
+  
+  // Częste nazwy ulic z błędami OCR (dla regionu pomorskiego)
+  cleanedText = cleanedText.replace(/\bGdańska\b/gi, 'Gdańska');
+  cleanedText = cleanedText.replace(/\bGdyńska\b/gi, 'Gdyńska');
+  cleanedText = cleanedText.replace(/\bMorsk[aieą]\b/gi, 'Morska');
+  cleanedText = cleanedText.replace(/\bPortow[aąe]\b/gi, 'Portowa');
+  cleanedText = cleanedText.replace(/\bPuck[aąie]\b/gi, 'Pucka');
+  
+  const candidates = extractCandidatesFromText(cleanedText);
   const resultBox = document.getElementById('candidatesResult');
   resultBox.innerHTML = '';
   candidatesWithIssues.clear();
@@ -2085,7 +2386,7 @@ async function extractAndGeocode(text){
       duplicates++;
       continue;
     }
-    const placeInfo = await resolveGooglePlace(c.name, loc.formatted, loc.lat, loc.lng, !!(loc.soft || loc.regionFallback));
+    const placeInfo = await resolveGooglePlace(c.name, loc.formatted, loc.lat, loc.lng);
     stops.push({ 
       id: ++stopCounter, 
       type: 'waypoint', 
@@ -3006,8 +3307,19 @@ async function runGenerateGoogleRoutes(){
   const batches = [];
   const maxPerBatch = 9; // max waypoints między origin a destination
   
+  // Dzielimy punkty na batche TAK żeby każdy kolejny batch zaczynał się od ostatniego punktu poprzedniego
   for(let i = 0; i < waypoints.length; i += maxPerBatch) {
-    batches.push(waypoints.slice(i, i + maxPerBatch));
+    const batchEnd = Math.min(i + maxPerBatch, waypoints.length);
+    const batchPoints = waypoints.slice(i, batchEnd);
+    
+    // Jeśli to NIE pierwszy batch, dodaj ostatni punkt poprzedniego batcha na początku
+    if(i > 0 && batches.length > 0){
+      const prevBatch = batches[batches.length - 1];
+      const lastPointOfPrevBatch = prevBatch[prevBatch.length - 1];
+      batchPoints.unshift(lastPointOfPrevBatch); // Dodaj na początek
+    }
+    
+    batches.push(batchPoints);
   }
   if(batches.length === 0) batches.push([]);
   
@@ -3078,29 +3390,28 @@ async function runGenerateGoogleRoutes(){
 function openBatchInMaps(batchIdx){
   const data = window[`batch_${batchIdx}_data`];
   if(!data) return;
-  const container = document.getElementById(`batch-${batchIdx}-points`);
-  const textareas = container.querySelectorAll('.route-addr-edit');
   
-  // Pobieramy adresy - USUWAMY NAZWY (firm i osób) z początku!
-  const addresses = [];
-  textareas.forEach((ta, idx) => {
-    let addr = ta.value.trim();
+  // Pobieramy punkty z tego konkretnego batcha (odcinka)
+  const routePoints = data.routePoints || [];
+  if(routePoints.length === 0){ showToast('Brak punktów w tym odcinku', 'error'); return; }
+  
+  // Użyj ZWERYFIKOWANYCH nazw z Google Places (jeśli dostępne)
+  const includeName = document.getElementById('includeNameInMaps')?.checked !== false;
+  const addresses = routePoints.map(rp => {
+    const stop = rp.stop;
     
-    // NOWA LOGIKA: Zawsze usuń pierwszą część przed przecinkiem (to nazwa firmy/osoby)
-    // Google Maps lepiej radzi sobie z czystym adresem: "Ulica Numer, Kod Miasto"
-    const firstComma = addr.indexOf(',');
-    if(firstComma > 0){
-      const firstPart = addr.substring(0, firstComma).trim();
-      const hasStreetNumber = /\d/.test(firstPart); // Czy ma numer domu?
-      
-      if(!hasStreetNumber){
-        // Pierwsza część NIE ma numeru domu = to nazwa (firma/osoba), USUŃ
-        addr = addr.substring(firstComma + 1).trim();
-      }
-      // Jeśli ma numer domu to prawdopodobnie "Ulica 123" - zostaw
+    // PRIORYTET 1: Jeśli jest googlePlaceName (zweryfikowana przez Google) - ZAWSZE użyj
+    if(stop.googlePlaceName){
+      return `${stop.googlePlaceName}, ${stop.address}`;
     }
     
-    addresses.push(addr);
+    // PRIORYTET 2: Jeśli checkbox włączony, użyj getMapsQueryForStop (heurystyka)
+    if(includeName){
+      return getMapsQueryForStop(stop, true);
+    }
+    
+    // PRIORYTET 3: Tylko czysty adres
+    return stop.address;
   });
   
   if(addresses.length < 1){ showToast('Brak punktów', 'error'); return; }
