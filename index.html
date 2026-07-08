@@ -346,9 +346,10 @@
   <!-- Mobilne zakładki - zawsze widoczne na górze -->
   <div class="mobile-tabs">
     <button class="tab active" data-tab="stops">📍 Trasa</button>
-    <button class="tab" data-tab="import">📸 Skanuj</button>
-    <button class="tab" data-tab="google">🗺️ Nawigacja</button>
-    <button class="tab" data-tab="dispatcher">📋 Dyspozytor</button>
+    <button class="tab" data-tab="vision">📄 Skan</button>
+    <button class="tab" data-tab="import">📱 Apka</button>
+    <button class="tab" data-tab="google">🗺️ Navi</button>
+    <button class="tab" data-tab="dispatcher">📋 Dysp</button>
   </div>
 
   <div class="main-container">
@@ -361,7 +362,8 @@
       </div>
       <div class="tabs">
         <button class="tab active" data-tab="stops">📍 Trasa</button>
-        <button class="tab" data-tab="import">📸 Skanuj</button>
+        <button class="tab" data-tab="vision">📄 Skan List</button>
+        <button class="tab" data-tab="import">📱 Apka</button>
         <button class="tab" data-tab="google">🗺️ Nawigacja</button>
         <button class="tab" data-tab="dispatcher">📋 Dyspozytor</button>
       </div>
@@ -490,40 +492,55 @@
         <div id="emptyHint" class="empty-hint">Brak punktów. Wgraj zdjęcia w zakładce „Skanuj" albo dodaj adres ręcznie — potem klikaj pinezki na mapie.</div>
       </div>
 
-      <div class="tab-content" id="tab-import">
+      <div class="tab-content" id="tab-vision">
         <p style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Wybierz źródło zdjęcia:</p>
         
         <div class="upload-buttons">
-          <div class="upload-btn" id="btnCamera">
+          <div class="upload-btn" id="btnVisionCamera">
             <div class="icon">📷</div>
             <div class="label">Aparat</div>
             <div class="sublabel">Zrób zdjęcie</div>
           </div>
-          <div class="upload-btn" id="btnGallery">
+          <div class="upload-btn" id="btnVisionGallery">
             <div class="icon">🖼️</div>
             <div class="label">Galeria</div>
             <div class="sublabel">Wybierz plik</div>
           </div>
         </div>
 
-        <input type="file" id="fileInputCamera" accept="image/*" capture="environment" hidden>
+        <input type="file" id="fileInputVisionCamera" accept="image/*" capture="environment" hidden>
+        <input type="file" id="fileInputVisionGallery" accept="image/*" multiple hidden>
+
+        <div id="fileChipListVision" class="file-chip-list"></div>
+
+        <button class="btn btn-block" id="btnProcessVisionFiles" disabled>🔍 Rozpoznaj odbiorców</button>
+
+        <div class="warn-box" style="margin-top:12px;">
+           Miłego Dnia Drogi Kurierze 🚚
+        </div>
+
+        <div class="ocr-result hidden" id="ocrResultVision">
+          <h4>📝 Ostatnio rozpoznany tekst</h4>
+          <div class="raw-text-preview" id="rawTextVision"></div>
+        </div>
+
+        <div id="candidatesResultVision" class="candidates-box"></div>
+      </div>
+
+      <div class="tab-content" id="tab-import">
+        <p style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Wybierz źródło zdjęcia:</p>
+        
+        <div class="upload-buttons">
+          <div class="upload-btn" id="btnGallery" style="max-width:280px;margin:0 auto;">
+            <div class="icon">🖼️</div>
+            <div class="label">Galeria</div>
+            <div class="sublabel">Wybierz plik</div>
+          </div>
+        </div>
+
         <input type="file" id="fileInputGallery" accept="image/*" multiple hidden>
 
         <div id="fileChipList" class="file-chip-list"></div>
-        
-        <div style="margin:16px 0; padding:12px; background:linear-gradient(135deg, #f8f9fc 0%, #e9ecef 100%); border-radius:8px; border-left:4px solid var(--blue);">
-          <div style="font-weight:600; margin-bottom:8px; color:var(--ink);">🔍 Wybierz tryb OCR (typ zdjęcia):</div>
-          <label style="display:block; margin-bottom:8px; cursor:pointer; padding:8px; background:#fff; border-radius:6px; border:2px solid var(--green);">
-            <input type="radio" name="ocrMode" value="vision" checked style="margin-right:8px;">
-            <b style="color:var(--green);">📄 Google Vision</b> - zdjęcie TELEFONU z kartki papierowej (listy przewozowe SUS, GEIS)
-            <div style="font-size:10px; color:var(--ink-soft); margin-left:24px; margin-top:4px;">Użyj gdy robisz zdjęcie aparatem/telefonem papierowego dokumentu</div>
-          </label>
-          <label style="display:block; cursor:pointer; padding:8px; background:#fff; border-radius:6px; border:2px solid var(--purple);">
-            <input type="radio" name="ocrMode" value="tesseract" style="margin-right:8px;">
-            <b style="color:var(--purple);">📱 Tesseract.js</b> - screenshot z APLIKACJI GEIS (wyeksportowane z systemu)
-            <div style="font-size:10px; color:var(--ink-soft); margin-left:24px; margin-top:4px;">Użyj gdy masz gotowy obraz/PDF wyeksportowany z aplikacji GEIS</div>
-          </label>
-        </div>
 
         <button class="btn btn-block" id="btnProcessFiles" disabled>🔍 Rozpoznaj odbiorców</button>
 
@@ -640,12 +657,12 @@
       <div class="desc" id="fixDialogDesc">Adres OCR jest uszkodzony. Popraw:</div>
       <label>Nazwa odbiorcy</label>
       <input type="text" id="fixName">
-      <label>Ulica i numer</label>
-      <input type="text" id="fixStreet">
+      <label>🔍 Ulica i numer (wpisz, pojawią się podpowiedzi)</label>
+      <input type="text" id="fixStreet" placeholder="Zacznij wpisywać, np. Morska 3...">
       <label>Kod pocztowy (XX-XXX)</label>
       <input type="text" id="fixPostal" maxlength="6" placeholder="84-107">
-      <label>Miasto / wieś</label>
-      <input type="text" id="fixCity" placeholder="Werblinia">
+      <label>🔍 Miasto / wieś (wpisz, pojawią się podpowiedzi)</label>
+      <input type="text" id="fixCity" placeholder="Zacznij wpisywać, np. Nowy Dwór...">
       <div style="margin-top:10px;padding:8px;background:#f0f7ff;border-radius:6px;font-size:11px;">
         <label style="margin-bottom:4px;display:block;">🏢 Nazwa firmy z Google (opcjonalne)</label>
         <input type="text" id="fixGooglePlace" placeholder="np. MANGO Food & Bar" style="font-size:11px;">
@@ -708,10 +725,11 @@ const CLOUD_COLLECTION = 'trasy'; // każdy kurier = osobny dokument w tej kolek
 let stops = [];
 let stopCounter = 0;
 let returnToStartActive = false;
-let pendingFiles = [];
+let pendingFiles = []; // Tesseract (GEIS)
+let pendingFilesVision = []; // Google Vision (papier)
 let map, markers = [], routeLine = null;
 let markerByStopId = new Map();
-let orderMode = 'geo'; // DOMYŚLNIE GEOGRAFICZNA OPTYMALIZACJA
+let orderMode = 'geo'; // Geograficzna optymalizacja (najkrótsza trasa)
 let nextRouteIndex = 0;
 let dominantRegion = null;
 let candidatesWithIssues = new Map();
@@ -734,7 +752,8 @@ document.addEventListener('DOMContentLoaded', () => {
   initMap();
   initTabs();
   initDragAndDrop();
-  initUploadButtons();
+  initUploadButtons(); // Tesseract (GEIS)
+  initVisionUploadButtons(); // Google Vision (papier)
   bindButtons();
   initBottomSheet();
   updateSheetPeekSummary();
@@ -986,8 +1005,12 @@ function initTabs(){
 function switchTab(tab){
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  document.querySelector(`.tab[data-tab="${tab}"]`).classList.add('active');
-  document.getElementById('tab-' + tab).classList.add('active');
+  
+  // Aktywuj WSZYSTKIE przyciski z tym data-tab (sidebar + mobile-tabs)
+  document.querySelectorAll(`.tab[data-tab="${tab}"]`).forEach(t => t.classList.add('active'));
+  
+  const content = document.getElementById('tab-' + tab);
+  if(content) content.classList.add('active');
   if(sheetApi && !document.getElementById('sidebarPanel')?.classList.contains('open')){
     sheetApi.show();
   }
@@ -1006,7 +1029,8 @@ function bindButtons(){
   document.getElementById('btnExportList').addEventListener('click', exportListToClipboard);
   document.getElementById('btnExportCSV').addEventListener('click', exportToCSV);
   document.getElementById('btnClearAll').addEventListener('click', clearAll);
-  document.getElementById('btnProcessFiles').addEventListener('click', processAllFiles);
+  document.getElementById('btnProcessFiles').addEventListener('click', processAllFiles); // Tesseract
+  document.getElementById('btnProcessVisionFiles')?.addEventListener('click', processVisionFiles); // Google Vision
   document.getElementById('btnGenGoogle').addEventListener('click', generateGoogleRoutes);
   document.getElementById('fixCancel').addEventListener('click', () => document.getElementById('fixDialog').classList.remove('show'));
   document.getElementById('fixAccept').addEventListener('click', acceptFixDialog);
@@ -1032,6 +1056,10 @@ function bindButtons(){
   // Autocomplete dla okien dialogowych
   attachPlacesAutocomplete(document.getElementById('quickAddInput'));
   attachPlacesAutocomplete(document.getElementById('editDialogAddress'));
+  
+  // Autocomplete dla dialogu "Popraw adres" (fixDialog)
+  attachPlacesAutocomplete(document.getElementById('fixStreet'));
+  attachPlacesAutocomplete(document.getElementById('fixCity'));
 
   document.getElementById('returnToStart').addEventListener('change', e => {
     returnToStartActive = e.target.checked; calculateRoute(); saveState();
@@ -1166,27 +1194,22 @@ function initDragAndDrop(){
 }
 
 function initUploadButtons(){
-  // Przycisk aparatu
-  document.getElementById('btnCamera').addEventListener('click', () => {
-    document.getElementById('fileInputCamera').click();
-  });
-  
-  // Przycisk galerii
-  document.getElementById('btnGallery').addEventListener('click', () => {
-    document.getElementById('fileInputGallery').click();
-  });
-
-  // Input aparatu
-  document.getElementById('fileInputCamera').addEventListener('change', e => {
-    if(e.target.files.length) addFiles(e.target.files);
-    e.target.value = ''; // reset dla ponownego wyboru tego samego pliku
-  });
+  // Przycisk galerii (Apka - tylko galeria)
+  const btnGallery = document.getElementById('btnGallery');
+  if(btnGallery){
+    btnGallery.addEventListener('click', () => {
+      document.getElementById('fileInputGallery').click();
+    });
+  }
 
   // Input galerii
-  document.getElementById('fileInputGallery').addEventListener('change', e => {
-    if(e.target.files.length) addFiles(e.target.files);
-    e.target.value = '';
-  });
+  const fileInputGallery = document.getElementById('fileInputGallery');
+  if(fileInputGallery){
+    fileInputGallery.addEventListener('change', e => {
+      if(e.target.files.length) addFiles(e.target.files);
+      e.target.value = '';
+    });
+  }
 }
 
 function addFiles(fileList){
@@ -1215,18 +1238,84 @@ function renderFileChips(){
     : '🔍 Rozpoznaj odbiorców';
 }
 
-/* OCR */
-function fileToBase64(file){
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result.split(',')[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
+/* === GOOGLE VISION (ZAKŁADKA OSOBNA) === */
+function initVisionUploadButtons(){
+  document.getElementById('btnVisionCamera')?.addEventListener('click', () => {
+    document.getElementById('fileInputVisionCamera').click();
+  });
+  
+  document.getElementById('btnVisionGallery')?.addEventListener('click', () => {
+    document.getElementById('fileInputVisionGallery').click();
+  });
+
+  document.getElementById('fileInputVisionCamera')?.addEventListener('change', e => {
+    if(e.target.files.length) addFilesVision(e.target.files);
+    e.target.value = '';
+  });
+
+  document.getElementById('fileInputVisionGallery')?.addEventListener('change', e => {
+    if(e.target.files.length) addFilesVision(e.target.files);
+    e.target.value = '';
   });
 }
 
-async function ocrImageVision(file){
-  // Google Vision API - lepsze dla zdjęć z kartki (SUS, GEIS papier)
+function addFilesVision(fileList){
+  Array.from(fileList).forEach(f => { 
+    if(f.type.startsWith('image/')) pendingFilesVision.push(f); 
+  });
+  renderFileChipsVision();
+}
+
+function removeFileVision(index){
+  pendingFilesVision.splice(index, 1);
+  renderFileChipsVision();
+}
+
+function renderFileChipsVision(){
+  const box = document.getElementById('fileChipListVision');
+  if(!box) return;
+  box.innerHTML = pendingFilesVision.map((f, i) => `
+    <div class="file-chip">
+      📄 ${f.name.length > 20 ? f.name.slice(0,18)+'…' : f.name}
+      <span class="remove" onclick="removeFileVision(${i})">✕</span>
+    </div>
+  `).join('');
+  const btn = document.getElementById('btnProcessVisionFiles');
+  if(btn){
+    btn.disabled = pendingFilesVision.length === 0;
+    btn.textContent = pendingFilesVision.length
+      ? `🔍 Rozpoznaj (${pendingFilesVision.length})`
+      : '🔍 Rozpoznaj odbiorców';
+  }
+}
+
+async function processVisionFiles(){
+  if(pendingFilesVision.length === 0) return;
+  showProgress(true, 'Google Vision OCR...', `1 / ${pendingFilesVision.length}`);
+  let combinedText = ''; let failed = 0;
+  for(let i = 0; i < pendingFilesVision.length; i++){
+    showProgress(true, 'Google Vision OCR...', `${i+1}/${pendingFilesVision.length}`);
+    try{ 
+      const text = await ocrImageGoogleVision(pendingFilesVision[i]); 
+      if(text) combinedText += '\n' + text; 
+      else failed++; 
+    } catch(e){ 
+      console.error('Vision OCR error:', e);
+      failed++; 
+    }
+  }
+  document.getElementById('rawTextVision').textContent = combinedText.trim() || '(brak)';
+  document.getElementById('ocrResultVision').classList.remove('hidden');
+  if(!combinedText.trim()){ showProgress(false); showToast('Brak tekstu', 'error'); return; }
+  
+  dominantRegion = detectDominantRegion(combinedText);
+  await extractAndGeocodeVision(combinedText);
+  pendingFilesVision = []; 
+  renderFileChipsVision();
+  if(failed > 0) showToast(`${failed} zdjęć nie przetworzono`, 'error');
+}
+
+async function ocrImageGoogleVision(file){
   const base64Data = await fileToBase64(file);
   const url = `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_API_KEY}`;
   const payload = { requests: [{ image: { content: base64Data }, features: [{ type: "TEXT_DETECTION" }] }] };
@@ -1238,40 +1327,124 @@ async function ocrImageVision(file){
   return ann && ann[0] ? ann[0].description : '';
 }
 
+async function extractAndGeocodeVision(text){
+  showProgress(true, 'Szukam odbiorców (Vision)...', '');
+  const candidates = extractCandidatesFromText_Vision(text);
+  const resultBox = document.getElementById('candidatesResultVision');
+  resultBox.innerHTML = '';
+  candidatesWithIssues.clear();
+  if(candidates.length === 0){
+    showProgress(false);
+    showToast('Nie rozpoznano odbiorców', 'error');
+    return;
+  }
+  
+  // Filtruj tylko pomorskie kody pocztowe (7X-XXX, 8X-XXX)
+  const pomorskieCandidates = candidates.filter(c => {
+    const postal = c.query.match(/\b([78])\d\s*-?\s*\d{3}\b/);
+    if(!postal) {
+      console.log(`⏭️ Pominięto (nie pomorskie): ${c.query}`);
+      return false;
+    }
+    return true;
+  });
+  
+  console.log(`🔍 Filtr pomorski: ${candidates.length} → ${pomorskieCandidates.length}`);
+  
+  let added = 0, duplicates = 0, failed = 0;
+  
+  // Tablice na wiersze - punkty niepewne NA GÓRZE
+  const failedRows = [];
+  const successRows = [];
+  
+  for(let idx = 0; idx < pomorskieCandidates.length; idx++){
+    const c = pomorskieCandidates[idx];
+    showProgress(true, `Geokodowanie ${idx+1}/${pomorskieCandidates.length}...`, c.name);
+    const loc = await geocodeAddress(c.query);
+    const row = document.createElement('div');
+    const phoneSuffix = c.phone ? ` · 📞 ${escapeHtml(c.phone)}` : '';
+    
+    if(!loc){
+      candidatesWithIssues.set(idx, c);
+      row.className = 'candidate-item fail';
+      row.innerHTML = `<div style="flex:1;"><div class="candidate-name">❌ ${escapeHtml(c.name)}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(c.query)}</div></div>
+        <div class="candidate-actions"><button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button></div>`;
+      failedRows.push(row);
+      failed++;
+      continue;
+    }
+    if(isDuplicate(loc.lat, loc.lng) || isTextDuplicate(c.name, loc.formatted)){
+      row.className = 'candidate-item fail';
+      row.innerHTML = `<div><div class="candidate-name">⚠️ duplikat</div><div class="candidate-addr">${escapeHtml(loc.formatted)}</div></div>`;
+      failedRows.push(row);
+      duplicates++;
+      continue;
+    }
+    const placeInfo = await resolveGooglePlace(c.name, loc.formatted, loc.lat, loc.lng);
+    stops.push({ id: ++stopCounter, type: 'waypoint', name: c.name || 'Odbiorca', address: loc.formatted, phone: c.phone || '', lat: loc.lat, lng: loc.lng, isEditing: false, visited: false, isCompany: placeInfo.isCompany, googlePlaceName: placeInfo.googlePlaceName, googlePlaceId: placeInfo.googlePlaceId, routeIndex: null });
+    const companyBadge = placeInfo.isCompany ? ' 🏢' : '';
+    row.className = 'candidate-item ok';
+    row.innerHTML = `<div style="flex:1;"><div class="candidate-name">✅ ${escapeHtml(c.name)}${companyBadge}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(loc.formatted)}</div></div>`;
+    successRows.push(row);
+    added++;
+    await sleep(150);
+  }
+  
+  // Dodaj wiersze: NAJPIERW niepewne (czerwone), POTEM sukces (zielone)
+  failedRows.forEach(r => resultBox.appendChild(r));
+  successRows.forEach(r => resultBox.appendChild(r));
+  
+  showProgress(false);
+  if(added > 0){
+    renderStops();
+    updateMap();
+    // NIE przełączaj zakładki - zostań w "Skan List"
+  }
+  let msg = `Dodano ${added}`;
+  if(duplicates > 0) msg += ` | Pominięto ${duplicates}`;
+  if(failed > 0) msg += ` | Nie znaleziono ${failed}`;
+  showToast(msg, added > 0 ? 'success' : 'error');
+}
+
+/* OCR */
+function fileToBase64(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 async function ocrImageTesseract(file){
-  // Tesseract.js - lepsze dla screenshotów z aplikacji GEIS (cyfrowe obrazki)
+  // Tesseract.js - dla screenshotów z aplikacji GEIS
   const result = await Tesseract.recognize(
     file,
     'pol+eng',
     {
       logger: m => {
         if(m.status === 'recognizing text'){
-          showProgress(true, 'OCR Tesseract...', `${Math.round(m.progress * 100)}%`);
+          showProgress(true, 'Tesseract OCR...', `${Math.round(m.progress * 100)}%`);
         }
       }
     }
   );
+  incrementApiUsage('tesseract');
   return result.data.text || '';
 }
 
-async function ocrImage(file){
-  // Wybierz tryb OCR na podstawie radio buttonów
-  const mode = document.querySelector('input[name="ocrMode"]:checked')?.value || 'vision';
-  
-  if(mode === 'tesseract'){
-    return await ocrImageTesseract(file);
-  } else {
-    return await ocrImageVision(file);
-  }
-}
 async function processAllFiles(){
   if(pendingFiles.length === 0) return;
-  showProgress(true, 'Rozpoznawanie...', `1 / ${pendingFiles.length}`);
+  showProgress(true, 'Tesseract OCR...', `1 / ${pendingFiles.length}`);
   let combinedText = ''; let failed = 0;
   for(let i = 0; i < pendingFiles.length; i++){
-    showProgress(true, 'OCR...', `${i+1}/${pendingFiles.length}`);
-    try{ const text = await ocrImage(pendingFiles[i]); if(text) combinedText += '\n' + text; else failed++; }
-    catch(e){ console.error('OCR error:', e); failed++; }
+    showProgress(true, 'Tesseract OCR...', `${i+1}/${pendingFiles.length}`);
+    try{ 
+      const text = await ocrImageTesseract(pendingFiles[i]); 
+      if(text) combinedText += '\n' + text; 
+      else failed++; 
+    }
+    catch(e){ console.error('Tesseract OCR error:', e); failed++; }
   }
   document.getElementById('rawText').textContent = combinedText.trim() || '(brak)';
   document.getElementById('ocrResult').classList.remove('hidden');
@@ -1295,6 +1468,10 @@ function cleanAddress(addr){
   if(!addr) return addr;
   let s = addr;
   
+  // Usuń "B/N" (bez numeru) - OCR często to dodaje
+  s = s.replace(/\s+B\/N\b/gi, '');
+  s = s.replace(/\s+b\/n\b/gi, '');
+  
   // NAJPIERW napraw częste błędy OCR w nazwach ulic
   s = s.replace(/\bŚw\.\s*arzewsk/gi, 'Swarzewsk'); // Swarzewska → błędnie czytana jako "Św. arzewska"
   s = s.replace(/\bSw\.\s*arzewsk/gi, 'Swarzewsk');
@@ -1314,7 +1491,8 @@ function cleanAddress(addr){
 }
 function extractPostalCode(addr){
   if(!addr) return null;
-  const m = addr.match(/\b(\d{2})\s*[- ]?\s*(\d{3})\b/);
+  // Dopasuj kod pocztowy w różnych formatach: 82-300, 82 300, 82300
+  const m = addr.match(/(\d{2})\s*[- ]?\s*(\d{3})(?:\b|,|$)/);
   if(m) return `${m[1]}-${m[2]}`;
   return null;
 }
@@ -1326,19 +1504,43 @@ function extractPostalPrefix(addr){
 function extractCity(addr){
   if(!addr) return null;
   const clean = addr.replace(/\bPolika\b/gi,'').replace(/Polska/i,'').trim();
+  
+  // Znajdź kod pocztowy
   const m = clean.match(/(\d{2})\s*[- ]?\s*(\d{3})/);
   if(m){
-    const after = clean.substring(m.index + m[0].length).split(',').shift().trim();
-    return after.replace(/\s+\d+[A-Za-z]?\s*$/, '').trim() || null;
+    // Weź fragment PRZED kodem pocztowym
+    const before = clean.substring(0, m.index);
+    // Ostatni element przed kodem to zwykle miasto
+    const parts = before.split(',').map(p => p.trim()).filter(Boolean);
+    if(parts.length > 0){
+      const cityCandidate = parts[parts.length - 1];
+      // Usuń numery domów z końca (np. "Warszawa 15A" → "Warszawa")
+      return cityCandidate.replace(/\s+\d+[A-Za-z\/\-]*\s*$/, '').trim() || null;
+    }
   }
   return null;
 }
 function extractStreetWithNumber(addr){
   if(!addr) return null;
-  const noPostal = addr.replace(/\b\d{2}\s*[- ]?\s*\d{3}\b/, '').replace(/,\s*$/,'').trim();
-  const m = noPostal.match(/^[A-ZĄĆĘŁŃÓŚŹŻŻŹĆŃÓŁĘĄŚ][a-ząćęłńóśźż\s]+?,\s*(.+)$/);
-  if(m) return m[1].split(',')[0].trim();
-  return noPostal.split(',')[0].trim() || null;
+  
+  // Usuń kod pocztowy z adresu
+  const noPostal = addr.replace(/(\d{2})\s*[- ]?\s*(\d{3})/, '').replace(/,\s*$/,'').trim();
+  
+  // Podziel na części po przecinkach
+  const parts = noPostal.split(',').map(p => p.trim()).filter(Boolean);
+  
+  // Pierwsza część to zwykle nazwa (pomiń)
+  // Druga część to zwykle ulica + numer
+  if(parts.length >= 2){
+    return parts[1]; // Ulica z numerem
+  }
+  
+  // Jeśli jest tylko jedna część (bez nazwy), to ona jest ulicą
+  if(parts.length === 1){
+    return parts[0];
+  }
+  
+  return null;
 }
 
 /* Ekstrakcja odbiorców */
@@ -1407,7 +1609,188 @@ function differentAddresses(a, b){
   if(pa.length && pb.length) return pa[pa.length-1] !== pb[pb.length-1];
   return false;
 }
-function extractCandidatesFromText(text){
+
+
+/* === TRYB 1: Google Vision (papier) - POMIJA NADAWCÓW JAK TRASAPRO(4) === */
+function isDocumentHeader_Vision(l){
+  return /^(dokument\s+za[łl]adunkowy|za[łl]adunk|frankatura\s*:|przewo[źz]nik\s*:|kierowca\s*:|pojazd\s*:|poiazd\s*:|data\s*:|magazyn\s*:|kategorie\s*produktu|nale[żz]y\s+dor[ęe]czy[ćc]|zwrot\s+dokument|jm\.|kod\s*kresk)/i.test(l);
+}
+function isFieldJunk_Vision(l){
+  return /^(numer\s+przesy[łl]k|nadawca\s*:|odbier[cs]a\s*:|dbiorca\s*:|biorca\s*:|jawca\s*:|masa\s*:|ilo[śs][ćc]\s*:|obj[ęe]to[śs][ćc]\s*:|llo[śs][ćc]\s*:|pm\s*:|asa\s*:|llo[śs][ćc]|hp\b|ep\b|bu\b|am\b|cc\b|jl\b|j[łl]\b|frankatura|kontakt\s*:|kategorie|pojazd|poiazd|przewo[źz]nik|kierowca|data|strona|wydrukowa[łl]|roz[łl]adunek|za[łl]adunek|referencje|kod\s+kresk|nale[żz]y|produkt|kraj|miasto|ulica|adres|uwagi|podpis|pobranie|cod|pobran|podpis|jm\b|wkp\b|netto|brutto|wymiary|waga\b|protok[oó][łl])/i.test(l.trim());
+}
+function isAddressLine_Vision(l){
+  if(!l || l.length < 8) return false;
+  if(isDocumentHeader_Vision(l) || isFieldJunk_Vision(l)) return false;
+  if(!/[A-Za-zżźćńółęąśŻŹĆŃÓŁĘĄŚ]/.test(l)) return false;
+  if(!/(?:\D|^)\d{2}\s*[- ]?\s*\d{3}(?:\D|$)/.test(l)) return false;
+  const digits = (l.match(/\d/g) || []).length;
+  if(digits > l.length * 0.42) return false;
+  return true;
+}
+function isRecordStart_Vision(l){
+  if(!l) return false;
+  const t = l.trim();
+  if(/(numer|nr)\s*przesy[łl]k[iy]?\s*:\s*\d{9,}/i.test(l)) return true;
+  if(/^(numer|nr)\s+\d{9,}/i.test(t)) return true;
+  if(/^(numer|nr)\s*przesy[łl]k[iy]?\s*:?\s*$/i.test(t)) return true;
+  if(/^przesy[łl]k[iy]?\s*:\s*$/i.test(t)) return true;
+  if(/^numer\s+przesylki\s*:?\s*$/i.test(t)) return true;
+  if(/^\d{9,20}$/.test(t)) return true;
+  return false;
+}
+function extractNameFromAddress_Vision(addr){
+  let name = addr.split(',')[0].trim();
+  name = name.replace(/\(KLIENT\)/gi, '').trim();
+  name = name.replace(/^(Odbier[cs]a|Nadawca|Dbiorca|Biorca|Jawca|Adawca|Przesy[łl]k[aie]?)\s*:?\s*/i, '');
+  if(name.length < 4) name = addr.split(/[,\s]/).slice(0,3).join(' ');
+  if(!name) name = 'Odbiorca';
+  return name;
+}
+function findPhoneNear_Vision(anchor, lines){
+  const lo = Math.max(0, anchor - 2);
+  const hi = Math.min(lines.length, anchor + 12);
+  for(let k = lo; k < hi; k++){
+    const m = lines[k].match(/kontakt\s*:?\s*\+?(\d[\d\s\-\.]{7,})/i);
+    if(m){ const t = ('+' + m[1]).replace(/[\s\-\.]/g,''); if(t.length >= 9) return t; }
+  }
+  return '';
+}
+function differentAddresses_Vision(a, b){
+  if(!a || !b) return false;
+  const pa = a.match(/\d{2}\s*[- ]?\s*\d{3}/g) || [];
+  const pb = b.match(/\d{2}\s*[- ]?\s*\d{3}/g) || [];
+  if(pa.length && pb.length) return pa[pa.length-1] !== pb[pb.length-1];
+  return false;
+}
+
+function extractCandidatesFromText_Vision(text){
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const candidates = [];
+  const usedLineIdx = new Set();
+
+  // Strategia 1: Dokumenty załądunkowe - wykryj separatory (numery przesyłek)
+  const separators = [];
+  for(let i = 0; i < lines.length; i++) if(isRecordStart_Vision(lines[i])) separators.push(i);
+  const windows = [];
+  if(separators.length > 0){
+    windows.push({ from: 0, to: separators[0] });
+    for(let s = 0; s < separators.length; s++){
+      const from = separators[s];
+      const to = s + 1 < separators.length ? separators[s+1] : lines.length;
+      windows.push({ from, to });
+    }
+  }
+  
+  windows.forEach((win) => {
+    let odbiorcaIdx = -1, nadawcaIdx = -1;
+    for(let j = win.from; j < win.to; j++){
+      if(isDocumentHeader_Vision(lines[j]) || isFieldJunk_Vision(lines[j])) continue;
+      if(!isAddressLine_Vision(lines[j])) continue;
+      if(usedLineIdx.has(j)) continue;
+      if(odbiorcaIdx < 0) odbiorcaIdx = j;
+      else if(nadawcaIdx < 0){
+        // Drugi adres z innym kodem pocztowym = nadawca (POMIJAMY)
+        if(differentAddresses_Vision(lines[odbiorcaIdx], lines[j])){ 
+          nadawcaIdx = j; 
+          usedLineIdx.add(j); 
+          break; 
+        }
+      }
+    }
+    if(odbiorcaIdx < 0 || usedLineIdx.has(odbiorcaIdx)) return;
+    usedLineIdx.add(odbiorcaIdx);
+    const addr = cleanAddress(lines[odbiorcaIdx]);
+    const name = extractNameFromAddress_Vision(addr);
+    const phone = findPhoneNear_Vision(odbiorcaIdx, lines);
+    candidates.push({ name, query: addr, phone, source: 'DOK_ZAL' });
+  });
+
+  // Strategia 2: (KLIENT) — SUS
+  for(let i = 0; i < lines.length; i++){
+    const line = lines[i];
+    if(!line.includes('(KLIENT)') || usedLineIdx.has(i)) continue;
+    const nameMatch = line.match(/\(KLIENT\)\s*([^;,\n]+)/i);
+    const name = nameMatch ? nameMatch[1].trim() : 'Odbiorca';
+    let addrParts = []; let phone = '';
+    const afterName = line.split(/\(KLIENT\)[^;]*;?/i)[1];
+    if(afterName && afterName.trim().length > 2) addrParts.push(afterName.trim());
+    let addressDone = /\d{2}\s*-?\s*\d{3}/.test(afterName || '');
+    for(let o = 1; o <= 3 && i + o < lines.length; o++){
+      const l = lines[i + o];
+      if(isFieldJunk_Vision(l) || isDocumentHeader_Vision(l)) continue;
+      const telMatch = l.match(/tel\.?:?\s*\+?(\d[\d\s\-\.]{7,})/i);
+      if(telMatch && !phone){ const t = ('+' + telMatch[1]).replace(/[\s\-\.]/g,''); if(t.length >= 9) phone = t; }
+      if(!addressDone){
+        const cleanPart = l.replace(/tel\.?:?.*$/i,'').trim();
+        if(cleanPart && cleanPart.length > 2) addrParts.push(cleanPart);
+        if(/\d{2}\s*-?\s*\d{3}/.test(l)) addressDone = true;
+      }
+      if(phone && addressDone) break;
+    }
+    const query = cleanAddress([name, ...addrParts].join(', ').replace(/;/g,',').replace(/,\s*,/g,',').replace(/,\s*$/,''));
+    if(query.length > 8) candidates.push({ name, query, phone, source: 'KLIENT' });
+  }
+
+  // Strategia 3: Odbiorca: / Odbiersa: / Dbiorca:
+  for(let i = 0; i < lines.length; i++){
+    const line = lines[i];
+    const lower = line.toLowerCase();
+    if(isRecordStart_Vision(line)) continue;
+    if(!/^odbier[cs]a\s*:?/i.test(line) && !lower.includes('odbierca:') && !lower.includes('odbiersa:') && !lower.includes('biorca:') && !lower.includes('dbiorca:')) continue;
+    if(usedLineIdx.has(i)) continue;
+    const headerOnly = /odbier[cs]a\s*:?\s*[a-zżźćńółęąś]*\s*nadawca\s*:/i.test(line) || /nadawca\s*:?\s*[a-zżźćńółęąś]*\s*odbier[cs]a\s*:/i.test(line);
+    if(headerOnly && !isAddressLine_Vision(line)) continue;
+    let addr = null;
+    const firstRest = line.replace(/^.*?odbier[cs]a\s*:?/i, '').trim();
+    if(firstRest && isAddressLine_Vision(firstRest)) addr = firstRest;
+    else {
+      for(let o = 1; o <= 12 && i + o < lines.length; o++){
+        const l = lines[i + o];
+        if(/^nadawca\s*:/i.test(l) || isRecordStart_Vision(l)) break;
+        if(isAddressLine_Vision(l) && !usedLineIdx.has(i + o)){ addr = l; break; }
+      }
+    }
+    if(!addr) continue;
+    const cleaned = cleanAddress(addr);
+    const name = extractNameFromAddress_Vision(cleaned);
+    const phone = findPhoneNear_Vision(i, lines);
+    candidates.push({ name, query: cleaned, phone, source: 'ODBIERCA' });
+  }
+
+  // Strategia 4: Numer-adres (ID + 4 linie)
+  for(let i = 0; i < lines.length; i++){
+    const line = lines[i];
+    if(!/^\d{9,20}$/.test(line.trim()) || usedLineIdx.has(i)) continue;
+    const context = lines.slice(Math.max(0, i - 3), i + 4).join(' ').toLowerCase();
+    if(/przesy[łl]k|frankatura|odbier[cs]a\s*:|nadawca\s*:/.test(context)) continue;
+    let parts = [];
+    for(let o = 1; o <= 4 && i + o < lines.length; o++){
+      const l = lines[i + o];
+      if(/^\d{9,20}$/.test(l.trim())) break;
+      parts.push(l);
+      if(/\d{2}\s*-?\s*\d{3}\b/.test(l)) break;
+    }
+    const full = cleanAddress(parts.join(' ').replace(/\s+,/g, ',').trim());
+    const hasLetters = /[A-ZŻŹĆŃŁŚĄĘÓa-ząćęłńóśźż]{2,}/.test(full);
+    if(full.length > 6 && hasLetters){
+      const name = extractNameFromAddress_Vision(full);
+      candidates.push({ name, query: full, phone: '', source: 'ID_LIST' });
+    }
+  }
+
+  // Deduplikacja
+  const seen = new Set();
+  const unique = [];
+  for(const c of candidates){
+    const key = c.query.toLowerCase().replace(/[\s,:.\-]/g,'');
+    if(!seen.has(key)){ seen.add(key); unique.push(c); }
+  }
+  return unique;
+}
+
+/* === TRYB 2: Tesseract (screenshoty GEIS) - WSZYSTKIE ADRESY === */
+function extractCandidatesFromText_Tesseract(text){
+
   let lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   
   console.log(`📋 OCR wykrył ${lines.length} linii tekstu`);
@@ -1658,6 +2041,97 @@ async function geocodeGoogle(rawAddress){
     
     // Jeśli nie znaleziono - spróbuj naprawić częste błędy OCR w nazwie ulicy
     if(data.status === 'ZERO_RESULTS'){
+      // PRIORYTET -1: KOLONIA / WIEŚ BEZ ULIC (np. "Komorowo Żuławskie 12/1")
+      // W małych wioskach/koloniach nie ma ulic - adresy to "Nazwa wsi numer_działki"
+      if(expectedPostal){
+        const parts = address.split(',').map(p => p.trim());
+        // Sprawdź czy "ulica" wygląda jak "Nazwa wsi + numer" (np. "Komorowo Żuławskie 12/1")
+        const firstPart = parts.length > 1 ? parts[1] : parts[0]; // Pomiń nazwę odbiorcy
+        const villageLike = /^([A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż\s]+)\s+(\d+[\/\-]?\d*)$/i.test(firstPart);
+        
+        if(villageLike){
+          const villageMatch = firstPart.match(/^([A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż\s]+)\s+(\d+[\/\-]?\d*)$/i);
+          if(villageMatch){
+            const villageName = villageMatch[1].trim();
+            const houseNumber = villageMatch[2];
+            
+            // Spróbuj: "Nazwa wsi, numer, kod_pocztowy"
+            const villageQuery = `${villageName} ${houseNumber}, ${expectedPostal}, Polska`;
+            console.log(`🏘️ Wygląda jak kolonia (brak ulic) - próbuję: "${villageQuery}"`);
+            
+            const villageUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(villageQuery)}&key=${GOOGLE_API_KEY}&language=pl&region=pl`;
+            const villageRes = await fetch(villageUrl);
+            const villageData = await villageRes.json();
+            incrementApiUsage('geocoding');
+            
+            if(villageData.status === 'OK' && villageData.results.length > 0){
+              const villagePlace = villageData.results[0];
+              console.log(`✅ Znaleziono kolonię: "${villagePlace.formatted_address}"`);
+              return { 
+                formatted: villagePlace.formatted_address, 
+                lat: villagePlace.geometry.location.lat, 
+                lng: villagePlace.geometry.location.lng,
+                soft: false
+              };
+            }
+            
+            // Jeśli nie znalazł dokładnego adresu, spróbuj tylko nazwę wsi + kod (bez numeru)
+            const villageOnlyQuery = `${villageName}, ${expectedPostal}, Polska`;
+            console.log(`🏘️ Próbuję bez numeru działki: "${villageOnlyQuery}"`);
+            
+            const villageOnlyUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(villageOnlyQuery)}&key=${GOOGLE_API_KEY}&language=pl&region=pl`;
+            const villageOnlyRes = await fetch(villageOnlyUrl);
+            const villageOnlyData = await villageOnlyRes.json();
+            incrementApiUsage('geocoding');
+            
+            if(villageOnlyData.status === 'OK' && villageOnlyData.results.length > 0){
+              const villageOnlyPlace = villageOnlyData.results[0];
+              console.log(`✅ Znaleziono wieś (przybliżenie): "${villageOnlyPlace.formatted_address}"`);
+              return { 
+                formatted: villageOnlyPlace.formatted_address + ` (nr ${houseNumber})`, 
+                lat: villageOnlyPlace.geometry.location.lat, 
+                lng: villageOnlyPlace.geometry.location.lng,
+                soft: true
+              };
+            }
+          }
+        }
+      }
+      
+      // PRIORYTET -0.5: BŁĘDNA LITERA W NUMERZE DOMU (OCR często dodaje "A", "B" gdzie ich nie ma)
+      // Spróbuj usunąć samotną literę z numeru: "KRYSZTAOWA 14 A" → "KRYSZTAOWA 14"
+      if(expectedPostal){
+        const street = extractStreetWithNumber(address);
+        if(street){
+          // Sprawdź czy jest samotna litera po numerze (np. "14 A", "3 B")
+          const hasSpacedLetter = /(\d+)\s+[A-Z](?:\s|$)/i.test(street);
+          if(hasSpacedLetter){
+            const streetNoLetter = street.replace(/(\d+)\s+[A-Z](?:\s|$)/gi, '$1 ').trim();
+            const noLetterQuery = `${streetNoLetter}, ${expectedPostal}, Polska`;
+            console.log(`🔧 OCR mógł dodać błędną literę - próbuję bez: "${noLetterQuery}"`);
+            
+            const noLetterUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(noLetterQuery)}&key=${GOOGLE_API_KEY}&language=pl&region=pl`;
+            const noLetterRes = await fetch(noLetterUrl);
+            const noLetterData = await noLetterRes.json();
+            incrementApiUsage('geocoding');
+            
+            if(noLetterData.status === 'OK' && noLetterData.results.length > 0){
+              const noLetterPlace = noLetterData.results[0];
+              const noLetterPostal = extractPostalCode(noLetterPlace.formatted_address);
+              if(noLetterPostal && noLetterPostal === expectedPostal){
+                console.log(`✅ Znaleziono bez błędnej litery: "${noLetterPlace.formatted_address}"`);
+                return { 
+                  formatted: noLetterPlace.formatted_address, 
+                  lat: noLetterPlace.geometry.location.lat, 
+                  lng: noLetterPlace.geometry.location.lng,
+                  soft: false
+                };
+              }
+            }
+          }
+        }
+      }
+      
       // PRIORYTET 0: Spróbuj najpierw tylko ulica + kod pocztowy (bez miasta)
       // To rozwiązuje problem gdy miasto jest błędne (np. "ELBLĄG BRONOWO GÓRNE" zamiast "Gronowo Górne")
       if(expectedPostal){
@@ -2482,28 +2956,55 @@ let fixDialogIdx = -1;
 function showFixDialog(idx, candidate){
   fixDialogIdx = idx;
   const c = candidate;
+  
+  // Wyciągnij dane z adresu OCR
+  const postal = extractPostalCode(c.query) || '';
+  const street = extractStreetWithNumber(c.query) || '';
+  const city = extractCity(c.query) || '';
+  
+  // KLUCZOWE: Wstaw "KOD-POCZTOWY ULICA" do pola ulicy
+  // Google Places autocomplete poprawi błędy OCR jeśli zacznie od kodu!
+  const streetWithPostal = postal && street ? `${postal} ${street}` : street;
+  
   document.getElementById('fixName').value = c.name || '';
-  document.getElementById('fixStreet').value = extractStreetWithNumber(c.query) || '';
-  document.getElementById('fixPostal').value = extractPostalCode(c.query) || '';
-  document.getElementById('fixCity').value = extractCity(c.query) || '';
-  document.getElementById('fixGooglePlace').value = ''; // Wyczyść pole Google Place
+  document.getElementById('fixStreet').value = streetWithPostal;
+  document.getElementById('fixPostal').value = postal;
+  document.getElementById('fixCity').value = city;
+  document.getElementById('fixGooglePlace').value = '';
   document.getElementById('fixDialogDesc').innerHTML = `OCR: <code style="background:#f0f0f0;padding:1px 4px;border-radius:3px;">${escapeHtml(c.query)}</code>`;
   document.getElementById('fixDialog').classList.add('show');
+  
+  // Focus na pole ulicy żeby od razu pokazało podpowiedzi
+  setTimeout(() => document.getElementById('fixStreet').focus(), 100);
 }
 async function acceptFixDialog(){
   const name = document.getElementById('fixName').value.trim() || 'Odbiorca';
-  const street = document.getElementById('fixStreet').value.trim();
+  let street = document.getElementById('fixStreet').value.trim();
   let postal = document.getElementById('fixPostal').value.trim();
   const city = document.getElementById('fixCity').value.trim();
-  const googlePlaceName = document.getElementById('fixGooglePlace').value.trim(); // Pobierz nazwę firmy
+  const googlePlaceName = document.getElementById('fixGooglePlace').value.trim();
+  
+  // Jeśli street zaczyna się od kodu pocztowego (np. "82-300 Kryształowa 14"), wyciągnij go
+  const streetPostalMatch = street.match(/^(\d{2}[-\s]?\d{3})\s+(.+)$/);
+  if(streetPostalMatch){
+    const extractedPostal = streetPostalMatch[1].replace(/\s+/g, '').replace(/^(\d{2})(\d{3})$/, '$1-$2');
+    const extractedStreet = streetPostalMatch[2];
+    // Jeśli pole postal jest puste, użyj wyciągniętego kodu
+    if(!postal) postal = extractedPostal;
+    street = extractedStreet;
+    console.log(`🔧 Wyciągnięto kod z ulicy: "${extractedPostal}" i ulicę: "${extractedStreet}"`);
+  }
   
   if(postal){
     postal = postal.replace(/\s+/g,'');
     const m = postal.match(/^(\d{2})[- ]?(\d{3})$/);
     if(m) postal = `${m[1]}-${m[2]}`;
   }
+  
   const parts = [name, street, postal, city].filter(Boolean);
   const newQuery = parts.join(', ');
+  console.log(`📍 Geokodowanie z dialogu: "${newQuery}"`);
+  
   document.getElementById('fixDialog').classList.remove('show');
   showProgress(true, 'Geokodowanie...', newQuery);
   const loc = await geocodeAddress(newQuery);
@@ -2562,34 +3063,15 @@ function removeCandidateRow(btn){
 
 /* Główny przebieg */
 async function extractAndGeocode(text){
-  showProgress(true, 'Szukam odbiorców...', '');
+  showProgress(true, 'Szukam odbiorców (Tesseract)...', '');
   
-  // PRE-PROCESSING: Napraw częste błędy OCR PRZED parsowaniem
-  let cleanedText = text;
+  const cleanedText = text;
   
-  // Częste błędy OCR w nazwach ulic
-  cleanedText = cleanedText.replace(/\bŚw\.\s*arzewsk/gi, 'Swarzewsk'); // Św. arzewska → Swarzewska
-  cleanedText = cleanedText.replace(/\bSw\.\s*arzewsk/gi, 'Swarzewsk');
-  cleanedText = cleanedText.replace(/\bŚw\.\s*([A-ZĄĆĘŁŃÓŚŹŻ])/g, 'Św. $1'); // Św. Jan → Św. Jan (popraw spacing)
+  // Zakładka "Apka" używa TYLKO Tesseract (wszystkie adresy)
+  console.log(`🔍 Tesseract OCR - wszystkie adresy`);
   
-  // Numery domów z "i" (80 i 82 → 80/82)
-  cleanedText = cleanedText.replace(/(\d+)\s+i\s+(\d+)/g, '$1/$2'); // "80 i 82" → "80/82"
-  
-  // Częste literówki OCR
-  cleanedText = cleanedText.replace(/\b0(?=\d)/g, 'O'); // 0lawa → Oława, 0strów → Ostrów
-  cleanedText = cleanedText.replace(/\bl(?=\s*\d{2,})/gi, '1'); // l23 → 123 (l jako 1 przy numerach)
-  cleanedText = cleanedText.replace(/\bGrunwa1dzka\b/gi, 'Grunwaldzka'); // 1 → l
-  cleanedText = cleanedText.replace(/\bKró1ewska\b/gi, 'Królewska');
-  cleanedText = cleanedText.replace(/\bPolna\s*l\s*\d/gi, (m) => m.replace('l', '')); // Polna l 23 → Polna 23
-  
-  // Częste nazwy ulic z błędami OCR (dla regionu pomorskiego)
-  cleanedText = cleanedText.replace(/\bGdańska\b/gi, 'Gdańska');
-  cleanedText = cleanedText.replace(/\bGdyńska\b/gi, 'Gdyńska');
-  cleanedText = cleanedText.replace(/\bMorsk[aieą]\b/gi, 'Morska');
-  cleanedText = cleanedText.replace(/\bPortow[aąe]\b/gi, 'Portowa');
-  cleanedText = cleanedText.replace(/\bPuck[aąie]\b/gi, 'Pucka');
-  
-  const candidates = extractCandidatesFromText(cleanedText);
+  const candidates = extractCandidatesFromText_Tesseract(cleanedText);
+    
   const resultBox = document.getElementById('candidatesResult');
   resultBox.innerHTML = '';
   candidatesWithIssues.clear();
@@ -2600,11 +3082,11 @@ async function extractAndGeocode(text){
   }
   let added = 0, duplicates = 0, failed = 0, soft = 0, regionFallback = 0, suspicious = 0;
   
-  // Tablice na wiersze - kolejność: podejrzane (czerwone) → niepewne (żółte) → normalne (zielone)
-  const suspiciousRows = [];
-  const uncertainRows = [];  // soft/regionFallback (żółte)
-  const normalRows = [];      // normalne (zielone)
+  // Tablice na wiersze - kolejność: niepewne (czerwone) NA GÓRZE → sukces (zielone) na dole
   const failedRows = [];
+  const suspiciousRows = [];
+  const uncertainRows = [];
+  const normalRows = [];
   
   for(let idx = 0; idx < candidates.length; idx++){
     const c = candidates[idx];
@@ -2633,7 +3115,7 @@ async function extractAndGeocode(text){
     if(!loc){
       candidatesWithIssues.set(idx, c);
       row.className = 'candidate-item fail';
-      row.setAttribute('data-candidate-idx', idx); // Dodaj indeks kandydata
+      row.setAttribute('data-candidate-idx', idx);
       row.innerHTML = `<div style="flex:1;"><div class="candidate-name">❌ ${escapeHtml(c.name)}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(c.query)}</div></div>
         <div class="candidate-actions">
           <button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button>
@@ -2644,51 +3126,22 @@ async function extractAndGeocode(text){
       continue;
     }
     
-    // WERYFIKACJA KODU POCZTOWEGO - akceptuj tylko 8X-XXX i 7X-XXX (region pomorski)
-    const postalCode = extractPostalCode(loc.formatted);
-    const postalPrefix = postalCode ? postalCode.substring(0, 1) : null;
-    const isSuspiciousRegion = postalPrefix && postalPrefix !== '8' && postalPrefix !== '7';
-    
-    // SPRAWDŹ czy Google zwrócił samo miasto (brak ulicy/numeru)
-    // Usuń kod pocztowy przed sprawdzeniem
-    const addressWithoutPostal = loc.formatted.replace(/\d{2}-\d{3}/g, '').trim();
-    const hasStreetNumber = /\d+[a-zA-Z]?\b/.test(addressWithoutPostal);
-    const looksLikeCityOnly = !hasStreetNumber && loc.formatted.split(',').length <= 2;
-    
-    if(looksLikeCityOnly){
-      // Google zwrócił samo miasto - BŁĄD geokodowania, nie dodawaj!
-      candidatesWithIssues.set(idx, c);
-      row.className = 'candidate-item fail';
-      row.setAttribute('data-candidate-idx', idx); // Dodaj indeks kandydata
-      row.innerHTML = `<div style="flex:1;">
-        <div class="candidate-name">❌ ${escapeHtml(c.name)} - BRAK DOKŁADNEGO ADRESU${phoneSuffix}</div>
-        <div class="candidate-addr">Znaleziono tylko: "${escapeHtml(loc.formatted)}" <span style="color:var(--red);font-weight:700;">(brak ulicy)</span></div>
-        <div style="font-size:10px;color:var(--red);margin-top:4px;">
-          <b>OCR wykrył:</b> "${escapeHtml(c.query)}"<br>
-          <b>Nazwa:</b> "${escapeHtml(c.name)}"<br>
-          Google nie znalazł dokładnego adresu. Popraw ręcznie.
-        </div>
-      </div>
-      <div class="candidate-actions">
-        <button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw adres</button>
-        <button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="removeCandidateRow(this)">🗑️ Usuń</button>
-      </div>`;
-      failedRows.push(row);
-      failed++;
-      continue;
-    }
-    
-    // Sprawdź duplikaty
-    const isDup = isDuplicate(loc.lat, loc.lng) || isTextDuplicate(c.name, loc.formatted);
-    
-    if(isDup){
-      // Prawdziwy duplikat (ten sam dokładny adres)
-      row.className = 'candidate-item fail';
+    if(isDuplicate(loc.lat, loc.lng) || isTextDuplicate(c.name, loc.formatted)){
+      row.className = 'candidate-item ok';
       row.innerHTML = `<div><div class="candidate-name">⚠️ duplikat</div><div class="candidate-addr">${escapeHtml(loc.formatted)}</div></div>`;
       failedRows.push(row);
       duplicates++;
       continue;
     }
+    
+    const postal = loc.formatted.match(/\b(\d{2})-?\d{3}\b/);
+    const isLocalRegion = postal && dominantRegion && postal[1] === dominantRegion;
+    const isSoftQuality = loc.source === 'roadsWithoutNumber' || loc.priority < 0;
+    const isRegionFallback = loc.source === 'regionFallback';
+    
+    if(isSoftQuality){ soft++; console.log(`⚠️ Niska jakość: ${loc.formatted}`); }
+    if(isRegionFallback){ regionFallback++; console.log(`🔄 Fallback region: ${loc.formatted}`); }
+    
     const placeInfo = await resolveGooglePlace(c.name, loc.formatted, loc.lat, loc.lng);
     stops.push({ 
       id: ++stopCounter, 
@@ -2704,68 +3157,49 @@ async function extractAndGeocode(text){
       googlePlaceName: placeInfo.googlePlaceName, 
       googlePlaceId: placeInfo.googlePlaceId, 
       routeIndex: null,
-      softQuality: loc.soft || loc.regionFallback,  // Czy był niepewny (żółty/fioletowy)?
-      manuallyVerified: false  // Czy został zweryfikowany ręcznie?
+      softQuality: isSoftQuality || isRegionFallback,
+      manuallyVerified: false
     });
-    const qualityBadge = loc.regionFallback ? '🟣' : (loc.soft ? '🟡' : '✅');
-    const companyBadge = placeInfo.isCompany ? ' 🏢' : '';
-    if(loc.regionFallback) regionFallback++;
-    else if(loc.soft) soft++;
     
-    // Jeśli kod pocztowy jest podejrzany (nie 7X-XXX ani 8X-XXX) - pokaż na czerwono z ostrzeżeniem
-    if(isSuspiciousRegion){
-      candidatesWithIssues.set(idx, c);
-      row.className = 'candidate-item fail';
-      row.setAttribute('data-candidate-idx', idx); // Dodaj indeks kandydata
-      row.setAttribute('data-stop-id', stopCounter); // Dodaj ID punktu
-      row.innerHTML = `<div style="flex:1;">
-        <div class="candidate-name">⚠️ ${escapeHtml(c.name)} - INNY REGION${phoneSuffix}</div>
-        <div class="candidate-addr">${escapeHtml(loc.formatted)} <span style="color:var(--red);font-weight:700;">(kod ${postalCode} - oczekiwano 7X-XXX lub 8X-XXX)</span></div>
-        <div style="font-size:10px;color:var(--red);margin-top:4px;"><b>Punkt poza regionem pomorskim.</b> Sprawdź czy adres jest poprawny.</div>
-      </div>
-      <div class="candidate-actions">
-        <button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button>
-        <button class="btn btn-sm btn-ghost" onclick="showEditDialog(${stopCounter})">✏️ Edytuj w trasie</button>
-        <button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="deleteStop(${stopCounter})">🗑️ Usuń</button>
-      </div>`;
+    const companyBadge = placeInfo.isCompany ? ' 🏢' : '';
+    const suspiciousBadge = !isLocalRegion && dominantRegion ? ' ⚠️' : '';
+    const softBadge = (isSoftQuality || isRegionFallback) ? ' 🟡' : '';
+    
+    row.className = 'candidate-item ok';
+    row.innerHTML = `<div style="flex:1;">
+      <div class="candidate-name">✅ ${escapeHtml(c.name)}${companyBadge}${suspiciousBadge}${softBadge}${phoneSuffix}</div>
+      <div class="candidate-addr">${escapeHtml(loc.formatted)}</div>
+    </div>
+    <div class="candidate-actions">
+      <button class="btn btn-sm btn-ghost" onclick="editStopFromCandidate(${stopCounter})">✏️ Edytuj</button>
+      <button class="btn btn-sm btn-danger" onclick="deleteStopFromCandidate(${stopCounter})">🗑️ Usuń</button>
+    </div>`;
+    
+    if(!isLocalRegion && dominantRegion){
       suspiciousRows.push(row);
       suspicious++;
-      added++;
+    } else if(isSoftQuality || isRegionFallback){
+      uncertainRows.push(row);
     } else {
-      row.className = loc.regionFallback ? 'candidate-item weak' : (loc.soft ? 'candidate-item warn' : 'candidate-item ok');
-      
-      // ZAWSZE dodaj przycisk edycji - użytkownik może chcieć poprawić
-      const editBtn = `<button class="btn btn-sm btn-ghost" onclick="showEditDialog(${stopCounter})">✏️ Edytuj</button>`;
-      const deleteBtn = `<button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="deleteStop(${stopCounter})">🗑️ Usuń</button>`;
-      const actions = (loc.soft || loc.regionFallback) ?
-        `<div class="candidate-actions"><button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, ${JSON.stringify(c).replace(/"/g, '&quot;')})">⚠️ Popraw</button>${editBtn}${deleteBtn}</div>` : 
-        `<div class="candidate-actions">${editBtn}${deleteBtn}</div>`;
-      row.setAttribute('data-stop-id', stopCounter); // Dodaj ID punktu
-      row.innerHTML = `<div style="flex:1;"><div class="candidate-name">${qualityBadge} ${escapeHtml(c.name)}${companyBadge}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(loc.formatted)}</div></div>${actions}`;
-      
-      // Punkty niepewne (żółte/fioletowe) idą do uncertainRows, normalne do normalRows
-      if(loc.soft || loc.regionFallback){
-        uncertainRows.push(row);
-      } else {
-        normalRows.push(row);
-      }
-      added++;
+      normalRows.push(row);
     }
+    
+    added++;
     await sleep(150);
   }
   
-  // Dodaj wiersze w kolejności: błędy (brak adresu) → podejrzane (czerwone) → niepewne (żółte) → normalne (zielone)
+  // Dodaj wiersze: NAJPIERW niepewne/błędy NA GÓRZE, POTEM sukces na dole
   failedRows.forEach(r => resultBox.appendChild(r));
   suspiciousRows.forEach(r => resultBox.appendChild(r));
   uncertainRows.forEach(r => resultBox.appendChild(r));
   normalRows.forEach(r => resultBox.appendChild(r));
   
   showProgress(false);
+  
   if(added > 0){
     renderStops();
     updateMap();
-    // Zostań w zakładce Skanuj zamiast przełączać na Trasa
-    // switchTab('stops');
+    // NIE przełączaj zakładki - zostań w Apka
   }
   let msg = `Dodano ${added}`;
   if(suspicious > 0) msg += ` | ⚠️ ${suspicious} podejrzanych (inny region)`;
@@ -2773,6 +3207,7 @@ async function extractAndGeocode(text){
   if(failed > 0) msg += ` | Nie znaleziono ${failed}`;
   showToast(msg, added > 0 ? 'success' : 'error');
 }
+
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 /* Ręczne dodawanie */
