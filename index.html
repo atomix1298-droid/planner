@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+<script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
@@ -328,7 +329,7 @@
     </div>
   </div>
   <div class="header-details" id="headerDetails">
-    <div class="sub">OCR listów → mapa → nawigacja → chmura</div>
+    <div class="sub">OCR Tesseract → mapa → nawigacja → chmura</div>
     <div class="sub" id="cloudStatus">☁️ Łączenie...</div>
     <div class="sub">🧑‍✈️ <span id="courierNameDisplay">—</span> <a href="#" id="btnChangeCourier" style="color:#cfe0ff;text-decoration:underline;">(zmień)</a></div>
     <div class="sub" id="apiUsageBar" style="font-size:10px;">📊 —</div>
@@ -1187,33 +1188,29 @@ function renderFileChips(){
 }
 
 /* OCR */
-function fileToBase64(file){
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result.split(',')[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
 async function ocrImage(file){
-  const base64Data = await fileToBase64(file);
-  const url = `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_API_KEY}`;
-  const payload = { requests: [{ image: { content: base64Data }, features: [{ type: "TEXT_DETECTION" }] }] };
-  const res = await fetch(url, { method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json' } });
-  const data = await res.json();
-  incrementApiUsage('vision');
-  if(data.error) throw new Error(data.error.message);
-  const ann = data.responses && data.responses[0] && data.responses[0].textAnnotations;
-  return ann && ann[0] ? ann[0].description : '';
+  // Tesseract.js - lepsze zachowanie struktury linii
+  const result = await Tesseract.recognize(
+    file,
+    'pol+eng', // Polski + angielski
+    {
+      logger: m => {
+        if(m.status === 'recognizing text'){
+          showProgress(true, 'OCR...', `${Math.round(m.progress * 100)}%`);
+        }
+      }
+    }
+  );
+  return result.data.text || '';
 }
 async function processAllFiles(){
   if(pendingFiles.length === 0) return;
-  showProgress(true, 'Rozpoznawanie...', `1 / ${pendingFiles.length}`);
+  showProgress(true, '📥 Pobieranie modelu OCR...', 'Po raz pierwszy - to chwilę potrwa');
   let combinedText = ''; let failed = 0;
   for(let i = 0; i < pendingFiles.length; i++){
     showProgress(true, 'OCR...', `${i+1}/${pendingFiles.length}`);
     try{ const text = await ocrImage(pendingFiles[i]); if(text) combinedText += '\n' + text; else failed++; }
-    catch(e){ failed++; }
+    catch(e){ console.error('OCR error:', e); failed++; }
   }
   document.getElementById('rawText').textContent = combinedText.trim() || '(brak)';
   document.getElementById('ocrResult').classList.remove('hidden');
@@ -1293,8 +1290,19 @@ function isAddressLine(l){
   if(digits > l.length * 0.42) return false;
   
   // NOWE: Odrzuć linie które są tylko "coś krótkie, miasto, kod"
-  // np. "3A, Elbląg, 82300" lub "Gdański, 83000"
+  // np. "3A, Elbląg, 82300" lub "Gdański, 83000" lub "WŁADYSŁAWOWO, 84120"
   const parts = l.split(',').map(p => p.trim());
+  
+  // Jeśli tylko 2 części (np. "WŁADYSŁAWOWO, 84120"), sprawdź czy to nie samo miasto
+  if(parts.length === 2){
+    const firstPart = parts[0];
+    const secondPart = parts[1];
+    // Jeśli druga część to tylko kod pocztowy i pierwsza to jedno słowo = samo miasto
+    if(/^\d{5,6}$/.test(secondPart.replace(/[\s-]/g, '')) && firstPart.split(/\s+/).length === 1){
+      return false; // To tylko "MIASTO, KOD" - odrzuć
+    }
+  }
+  
   if(parts.length >= 2){
     const firstPart = parts[0];
     // Jeśli pierwsza część to tylko 1-2 słowa bez ulicy/nazwy, odrzuć
@@ -1450,7 +1458,34 @@ function extractCandidatesFromText(text){
     const key = c.query.toLowerCase().replace(/[\s,:.\-]/g,'');
     if(!seen.has(key)){ seen.add(key); unique.push(c); }
   }
-  return unique;
+  
+  // FILTR: Usuń "śmieciowe" miasta (tylko nazwa + kod, bez ulicy)
+  const filtered = unique.filter(c => {
+    const parts = c.query.split(',').map(p => p.trim());
+    
+    // Jeśli query to tylko 2 części: "MIASTO, KOD"
+    if(parts.length === 2){
+      const firstPart = parts[0];
+      const secondPart = parts[1];
+      
+      // Sprawdź czy druga część to kod pocztowy (5-6 cyfr)
+      const isPostalCode = /^\d{5,6}$/.test(secondPart.replace(/[\s-]/g, ''));
+      
+      // Sprawdź czy pierwsza część to tylko jedno słowo (nazwa miasta)
+      const words = firstPart.split(/\s+/).filter(w => w.length > 0);
+      const isSingleWord = words.length === 1;
+      
+      // Jeśli to "MIASTO, KOD" bez ulicy → USUŃ
+      if(isPostalCode && isSingleWord){
+        console.log('🗑️ Odrzucono śmieciowe miasto:', c.query);
+        return false;
+      }
+    }
+    
+    return true; // Zachowaj
+  });
+  
+  return filtered;
 }
 
 /* Geokodowanie */
@@ -1977,6 +2012,23 @@ async function extractAndGeocode(text){
   for(let idx = 0; idx < candidates.length; idx++){
     const c = candidates[idx];
     showProgress(true, `Geokodowanie ${idx+1}/${candidates.length}...`, c.name);
+    
+    // SPRAWDŹ czy query to samo miasto (bez ulicy) PRZED geokodowaniem
+    const queryParts = c.query.split(',').map(p => p.trim());
+    if(queryParts.length === 2){
+      const firstPart = queryParts[0];
+      const secondPart = queryParts[1];
+      const isPostalCode = /^\d{5,6}$/.test(secondPart.replace(/[\s-]/g, ''));
+      const words = firstPart.split(/\s+/).filter(w => w.length > 0);
+      const isSingleWord = words.length === 1;
+      
+      if(isPostalCode && isSingleWord){
+        // To jest samo miasto typu "WŁADYSŁAWOWO, 84120" - POMIŃ całkowicie!
+        console.log('⏭️ Pominięto samo miasto:', c.query);
+        continue; // Nie geokoduj, nie pokazuj
+      }
+    }
+    
     const loc = await geocodeAddress(c.query);
     const row = document.createElement('div');
     const phoneSuffix = c.phone ? ` · 📞 ${escapeHtml(c.phone)}` : '';
