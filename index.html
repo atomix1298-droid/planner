@@ -150,6 +150,9 @@
 
   .leaflet-tooltip.stop-label{background:#fff;border:1px solid #c7cde3;border-radius:6px;
     padding:2px 7px;font-size:10.5px;font-weight:700;color:var(--ink);box-shadow:0 1px 4px rgba(0,0,0,.15);}
+  
+  .leaflet-tooltip.address-label{background:rgba(255,255,255,0.9);border:1px solid #ddd;border-radius:4px;
+    padding:1px 5px;font-size:9px;font-weight:400;color:#555;box-shadow:0 1px 3px rgba(0,0,0,.1);}
 
   .google-routes{margin-top:12px;}
   .route-batch{background:#f8f9fc;border-radius:10px;padding:12px;margin-bottom:10px;border-left:3px solid var(--blue);}
@@ -272,7 +275,7 @@
     }
     .sidebar.open{transform:translateX(0);}
     .sidebar.dragging{transition:none;}
-    .sidebar .tabs{display:none !important;} /* Ukryj zakładki w panelu - są teraz na dole ekranu */
+    .sidebar .tabs{display:none !important;} /* Ukryj zakładki w panelu na mobile - są na dole */
     .sheet-peek-summary{display:none;}
     .sheet-handle{
       position:absolute;top:50%;right:-36px;transform:translateY(-50%);
@@ -638,6 +641,11 @@
       <input type="text" id="fixPostal" maxlength="6" placeholder="84-107">
       <label>Miasto / wieś</label>
       <input type="text" id="fixCity" placeholder="Werblinia">
+      <div style="margin-top:10px;padding:8px;background:#f0f7ff;border-radius:6px;font-size:11px;">
+        <label style="margin-bottom:4px;display:block;">🏢 Nazwa firmy z Google (opcjonalne)</label>
+        <input type="text" id="fixGooglePlace" placeholder="np. MANGO Food & Bar" style="font-size:11px;">
+        <div style="font-size:10px;color:#666;margin-top:4px;">Jeśli to firma, wpisz jej nazwę z Google Maps. Zostanie zweryfikowana.</div>
+      </div>
       <div class="actions">
         <button class="btn btn-sm btn-ghost" id="fixCancel">Anuluj</button>
         <button class="btn btn-sm btn-secondary" id="fixAccept" style="flex:2">Zatwierdź</button>
@@ -1343,7 +1351,7 @@ function isAddressLine(l){
   if(digits > l.length * 0.42) return false;
   
   // NOWE: Odrzuć linie które są tylko "coś krótkie, miasto, kod"
-  // np. "3A, Elbląg, 82300" lub "Gdański, 83000" lub "WŁADYSŁAWOWO, 84120"
+  // np. "WŁADYSŁAWOWO, 84120" (samo miasto bez ulicy)
   const parts = l.split(',').map(p => p.trim());
   
   // Jeśli tylko 2 części (np. "WŁADYSŁAWOWO, 84120"), sprawdź czy to nie samo miasto
@@ -1353,17 +1361,6 @@ function isAddressLine(l){
     // Jeśli druga część to tylko kod pocztowy i pierwsza to jedno słowo = samo miasto
     if(/^\d{5,6}$/.test(secondPart.replace(/[\s-]/g, '')) && firstPart.split(/\s+/).length === 1){
       return false; // To tylko "MIASTO, KOD" - odrzuć
-    }
-  }
-  
-  if(parts.length >= 2){
-    const firstPart = parts[0];
-    // Jeśli pierwsza część to tylko 1-2 słowa bez ulicy/nazwy, odrzuć
-    const words = firstPart.split(/\s+/).filter(w => w.length > 0);
-    if(words.length <= 2 && firstPart.length < 15){
-      // Sprawdź czy to wygląda na fragment adresu (np. "3A" lub "Gdański")
-      const looksLikeFragment = /^[\d\s]+[A-Za-z]?$/.test(firstPart) || /^[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż]+$/.test(firstPart);
-      if(looksLikeFragment) return false;
     }
   }
   
@@ -1405,7 +1402,40 @@ function differentAddresses(a, b){
   return false;
 }
 function extractCandidatesFromText(text){
-  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  let lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  
+  console.log(`📋 OCR wykrył ${lines.length} linii tekstu`);
+  
+  // NAPRAW: Połącz linie które są kontynuacją adresu (rozbite przez OCR)
+  // Np. "Piątek Karolina, Sportowa 42 2 2, Nowy Dwór" + "Gdański, 82100"
+  const merged = [];
+  for(let i = 0; i < lines.length; i++){
+    const current = lines[i];
+    const next = i + 1 < lines.length ? lines[i + 1] : null;
+    
+    // Jeśli obecna linia NIE ma kodu pocztowego ale następna TAK, połącz je
+    const currentHasPostal = /\d{2}\s*[- ]?\s*\d{3}/.test(current);
+    const nextHasPostal = next && /\d{2}\s*[- ]?\s*\d{3}/.test(next);
+    
+    if(!currentHasPostal && nextHasPostal && next){
+      // Sprawdź czy next nie jest nowym rekordem (zaczyna się od numeru przesyłki)
+      const nextIsNewRecord = /^\d{12,}/.test(next);
+      if(!nextIsNewRecord){
+        // Połącz linie
+        const mergedLine = (current + ' ' + next).trim();
+        console.log(`🔗 Połączono linie: "${current}" + "${next}" = "${mergedLine}"`);
+        merged.push(mergedLine);
+        i++; // Pomiń następną linię (już połączona)
+        continue;
+      }
+    }
+    
+    merged.push(current);
+  }
+  
+  console.log(`📋 Po połączeniu: ${merged.length} linii`);
+  
+  lines = merged;
   const candidates = [];
   const usedLineIdx = new Set();
 
@@ -1421,22 +1451,24 @@ function extractCandidatesFromText(text){
     }
   }
   windows.forEach((win) => {
-    let odbiorcaIdx = -1, nadawcaIdx = -1;
     for(let j = win.from; j < win.to; j++){
       if(isDocumentHeader(lines[j]) || isFieldJunk(lines[j])) continue;
-      if(!isAddressLine(lines[j])) continue;
-      if(usedLineIdx.has(j)) continue;
-      if(odbiorcaIdx < 0) odbiorcaIdx = j;
-      else if(nadawcaIdx < 0){
-        if(differentAddresses(lines[odbiorcaIdx], lines[j])){ nadawcaIdx = j; usedLineIdx.add(j); break; }
+      const passedAddressLine = isAddressLine(lines[j]);
+      if(!passedAddressLine){
+        console.log(`❌ isAddressLine odrzucił: "${lines[j]}"`);
+        continue;
       }
+      if(usedLineIdx.has(j)) continue;
+      console.log(`✅ isAddressLine zaakceptował: "${lines[j]}"`);
+      
+      // Dodaj każdy adres jako kandydata (nie tylko pierwszy!)
+      usedLineIdx.add(j);
+      const addr = cleanAddress(lines[j]);
+      const name = extractNameFromAddress(addr);
+      const phone = findPhoneNear(j, lines);
+      console.log(`➕ Dodano kandydata: "${name}" - query: "${addr}"`);
+      candidates.push({ name, query: addr, phone, source: 'DOK_ZAL' });
     }
-    if(odbiorcaIdx < 0 || usedLineIdx.has(odbiorcaIdx)) return;
-    usedLineIdx.add(odbiorcaIdx);
-    const addr = cleanAddress(lines[odbiorcaIdx]);
-    const name = extractNameFromAddress(addr);
-    const phone = findPhoneNear(odbiorcaIdx, lines);
-    candidates.push({ name, query: addr, phone, source: 'DOK_ZAL' });
   });
   for(let i = 0; i < lines.length; i++){
     const line = lines[i];
@@ -2218,6 +2250,7 @@ function showFixDialog(idx, candidate){
   document.getElementById('fixStreet').value = extractStreetWithNumber(c.query) || '';
   document.getElementById('fixPostal').value = extractPostalCode(c.query) || '';
   document.getElementById('fixCity').value = extractCity(c.query) || '';
+  document.getElementById('fixGooglePlace').value = ''; // Wyczyść pole Google Place
   document.getElementById('fixDialogDesc').innerHTML = `OCR: <code style="background:#f0f0f0;padding:1px 4px;border-radius:3px;">${escapeHtml(c.query)}</code>`;
   document.getElementById('fixDialog').classList.add('show');
 }
@@ -2226,6 +2259,8 @@ async function acceptFixDialog(){
   const street = document.getElementById('fixStreet').value.trim();
   let postal = document.getElementById('fixPostal').value.trim();
   const city = document.getElementById('fixCity').value.trim();
+  const googlePlaceName = document.getElementById('fixGooglePlace').value.trim(); // Pobierz nazwę firmy
+  
   if(postal){
     postal = postal.replace(/\s+/g,'');
     const m = postal.match(/^(\d{2})[- ]?(\d{3})$/);
@@ -2239,7 +2274,14 @@ async function acceptFixDialog(){
   showProgress(false);
   if(loc){
     if(!isDuplicate(loc.lat, loc.lng) && !isTextDuplicate(name, loc.formatted)){
-      const placeInfo = await resolveGooglePlace(name, loc.formatted, loc.lat, loc.lng);
+      // Jeśli user podał nazwę firmy, użyj jej bezpośrednio (pomiń auto-detekcję)
+      let placeInfo;
+      if(googlePlaceName){
+        placeInfo = { isCompany: true, googlePlaceName: googlePlaceName, googlePlaceId: null };
+      } else {
+        placeInfo = await resolveGooglePlace(name, loc.formatted, loc.lat, loc.lng);
+      }
+      
       stops.push({ 
         id: ++stopCounter, 
         type: 'waypoint', 
@@ -2257,11 +2299,29 @@ async function acceptFixDialog(){
         softQuality: false,
         manuallyVerified: true  // Poprawiony ręcznie = zweryfikowany
       });
+      
+      // Usuń wiersz z listy skanowania (poprawiony = znika)
+      const oldRow = document.querySelector(`.candidate-item[data-candidate-idx="${fixDialogIdx}"]`);
+      if(oldRow) oldRow.remove();
+      
       renderStops(); updateMap(); calculateRoute();
-      showToast(`✅ Dodano: ${name}`);
-    } else { showToast('Duplikat', 'error'); }
+      showToast(`✅ Poprawiono: ${name}`);
+    } else { 
+      // Duplikat - usuń wiersz z listy skanowania
+      const oldRow = document.querySelector(`.candidate-item[data-candidate-idx="${fixDialogIdx}"]`);
+      if(oldRow) oldRow.remove();
+      showToast('Duplikat - usunięto z listy', 'error'); 
+    }
   } else { showToast('Nie znaleziono', 'error'); }
   fixDialogIdx = -1;
+}
+
+/* Usuń kandydata z listy skanowanych */
+function removeCandidateRow(btn){
+  const row = btn.closest('.candidate-item');
+  if(row && confirm('Usunąć ten punkt z wyników skanowania?')){
+    row.remove();
+  }
 }
 
 /* Główny przebieg */
@@ -2312,6 +2372,7 @@ async function extractAndGeocode(text){
   
   for(let idx = 0; idx < candidates.length; idx++){
     const c = candidates[idx];
+    console.log(`🔍 Kandydat ${idx+1}/${candidates.length}: "${c.name}" - query: "${c.query}"`);
     showProgress(true, `Geokodowanie ${idx+1}/${candidates.length}...`, c.name);
     
     // SPRAWDŹ czy query to samo miasto (bez ulicy) PRZED geokodowaniem
@@ -2336,8 +2397,12 @@ async function extractAndGeocode(text){
     if(!loc){
       candidatesWithIssues.set(idx, c);
       row.className = 'candidate-item fail';
+      row.setAttribute('data-candidate-idx', idx); // Dodaj indeks kandydata
       row.innerHTML = `<div style="flex:1;"><div class="candidate-name">❌ ${escapeHtml(c.name)}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(c.query)}</div></div>
-        <div class="candidate-actions"><button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button></div>`;
+        <div class="candidate-actions">
+          <button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button>
+          <button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="removeCandidateRow(this)">🗑️ Usuń</button>
+        </div>`;
       failedRows.push(row);
       failed++;
       continue;
@@ -2358,6 +2423,7 @@ async function extractAndGeocode(text){
       // Google zwrócił samo miasto - BŁĄD geokodowania, nie dodawaj!
       candidatesWithIssues.set(idx, c);
       row.className = 'candidate-item fail';
+      row.setAttribute('data-candidate-idx', idx); // Dodaj indeks kandydata
       row.innerHTML = `<div style="flex:1;">
         <div class="candidate-name">❌ ${escapeHtml(c.name)} - BRAK DOKŁADNEGO ADRESU${phoneSuffix}</div>
         <div class="candidate-addr">Znaleziono tylko: "${escapeHtml(loc.formatted)}" <span style="color:var(--red);font-weight:700;">(brak ulicy)</span></div>
@@ -2369,6 +2435,7 @@ async function extractAndGeocode(text){
       </div>
       <div class="candidate-actions">
         <button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw adres</button>
+        <button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="removeCandidateRow(this)">🗑️ Usuń</button>
       </div>`;
       failedRows.push(row);
       failed++;
@@ -2413,6 +2480,8 @@ async function extractAndGeocode(text){
     if(isSuspiciousRegion){
       candidatesWithIssues.set(idx, c);
       row.className = 'candidate-item fail';
+      row.setAttribute('data-candidate-idx', idx); // Dodaj indeks kandydata
+      row.setAttribute('data-stop-id', stopCounter); // Dodaj ID punktu
       row.innerHTML = `<div style="flex:1;">
         <div class="candidate-name">⚠️ ${escapeHtml(c.name)} - INNY REGION${phoneSuffix}</div>
         <div class="candidate-addr">${escapeHtml(loc.formatted)} <span style="color:var(--red);font-weight:700;">(kod ${postalCode} - oczekiwano 7X-XXX lub 8X-XXX)</span></div>
@@ -2421,6 +2490,7 @@ async function extractAndGeocode(text){
       <div class="candidate-actions">
         <button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button>
         <button class="btn btn-sm btn-ghost" onclick="showEditDialog(${stopCounter})">✏️ Edytuj w trasie</button>
+        <button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="deleteStop(${stopCounter})">🗑️ Usuń</button>
       </div>`;
       suspiciousRows.push(row);
       suspicious++;
@@ -2430,9 +2500,11 @@ async function extractAndGeocode(text){
       
       // ZAWSZE dodaj przycisk edycji - użytkownik może chcieć poprawić
       const editBtn = `<button class="btn btn-sm btn-ghost" onclick="showEditDialog(${stopCounter})">✏️ Edytuj</button>`;
+      const deleteBtn = `<button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="deleteStop(${stopCounter})">🗑️ Usuń</button>`;
       const actions = (loc.soft || loc.regionFallback) ?
-        `<div class="candidate-actions"><button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, ${JSON.stringify(c).replace(/"/g, '&quot;')})">⚠️ Popraw</button>${editBtn}</div>` : 
-        `<div class="candidate-actions">${editBtn}</div>`;
+        `<div class="candidate-actions"><button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, ${JSON.stringify(c).replace(/"/g, '&quot;')})">⚠️ Popraw</button>${editBtn}${deleteBtn}</div>` : 
+        `<div class="candidate-actions">${editBtn}${deleteBtn}</div>`;
+      row.setAttribute('data-stop-id', stopCounter); // Dodaj ID punktu
       row.innerHTML = `<div style="flex:1;"><div class="candidate-name">${qualityBadge} ${escapeHtml(c.name)}${companyBadge}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(loc.formatted)}</div></div>${actions}`;
       
       // Punkty niepewne (żółte/fioletowe) idą do uncertainRows, normalne do normalRows
@@ -2857,6 +2929,20 @@ function setCenterPoint(id){
   }).addTo(map).bindPopup(`<b>📍 Punkt centralny</b><br>${stop.name}`);
 }
 
+/* Usuwanie punktu */
+function deleteStop(id){
+  const stop = stops.find(s => s.id === id);
+  if(!stop) return;
+  
+  if(confirm(`Usunąć punkt "${stop.name}"?`)){
+    stops = stops.filter(s => s.id !== id);
+    renderStops();
+    updateMap(false);
+    calculateRoute();
+    showToast('Punkt usunięty');
+  }
+}
+
 /* Okno edycji punktu */
 function showEditDialog(id){
   const stop = stops.find(s => s.id === id);
@@ -3112,13 +3198,10 @@ function updateMap(fit = true){
           toggleStopInRoute(stop.id);
         }
       });
-    } else {
-      marker.bindTooltip(`${routePosById.get(stop.id) || ''}. ${stop.name}`, { permanent: false, direction: 'right', offset: [8,-6], className: 'stop-label' });
     }
 
-    if(inRoute && stop.type === 'waypoint'){
-      marker.bindTooltip(`${routePosById.get(stop.id)}. ${stop.name}`, { permanent: false, direction: 'right', offset: [8,-6], className: 'stop-label' });
-    }
+    // Zawsze pokaż adres pod pinsezką (małymi literkami)
+    marker.bindTooltip(`${stop.address}`, { permanent: true, direction: 'bottom', offset: [0, 10], className: 'address-label' });
 
     markerByStopId.set(stop.id, marker);
     markers.push(marker);
