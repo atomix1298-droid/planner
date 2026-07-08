@@ -532,7 +532,7 @@
         </div>
         <div class="checkbox-group">
           <input type="checkbox" id="includeNameInMaps" checked>
-          <label for="includeNameInMaps">Doklejaj nazwę firmy do adresu w nawigacji</label>
+          <label for="includeNameInMaps">Doklejaj nazwę firmy do adresu w nawigacji <span style="color:#e74c3c;font-weight:700;">⚠️ JEŻELI MAPA SIĘ NIE WŁĄCZA - WYŁĄCZ TĘ OPCJĘ!</span></label>
         </div>
         <div class="checkbox-group">
           <input type="checkbox" id="companyDetection" checked>
@@ -1059,15 +1059,53 @@ function bindButtons(){
 }
 
 function initMap(){
-  map = L.map('map').setView([54.35, 18.5], 9);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap', maxZoom: 19
-  }).addTo(map);
-  setTimeout(() => map.invalidateSize(), 250);
-  window.addEventListener('resize', () => map && map.invalidateSize());
-  window.addEventListener('orientationchange', () => setTimeout(() => map && map.invalidateSize(), 300));
-  map.on('zoomend', updateTooltipVisibility);
+  try {
+    // Sprawdź czy Leaflet jest załadowany
+    if(typeof L === 'undefined'){
+      console.error('Leaflet nie załadował się. Tryb bez mapy.');
+      enableMaplessMode();
+      return;
+    }
+    
+    map = L.map('map').setView([54.35, 18.5], 9);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap', maxZoom: 19
+    }).addTo(map);
+    setTimeout(() => map.invalidateSize(), 250);
+    window.addEventListener('resize', () => map && map.invalidateSize());
+    window.addEventListener('orientationchange', () => setTimeout(() => map && map.invalidateSize(), 300));
+    map.on('zoomend', updateTooltipVisibility);
+  } catch(err) {
+    console.error('Błąd ładowania mapy:', err);
+    enableMaplessMode();
+  }
 }
+
+// Tryb bez mapy - ukryj mapę i pokaż tylko listy
+function enableMaplessMode(){
+  const mapContainer = document.getElementById('map');
+  if(mapContainer){
+    mapContainer.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;height:100%;background:#f5f7fa;flex-direction:column;padding:20px;text-align:center;">
+        <div style="font-size:48px;margin-bottom:16px;">🗺️</div>
+        <div style="font-size:18px;font-weight:600;color:#2c3e50;margin-bottom:8px;">Mapa niedostępna</div>
+        <div style="font-size:14px;color:#7f8c8d;max-width:400px;line-height:1.5;">
+          Nie można załadować mapy (brak połączenia lub blokada skryptów).<br>
+          <b>Aplikacja działa dalej!</b> Możesz używać zakładki <b>Trasa</b> do zarządzania punktami i eksportować listę.
+        </div>
+        <button class="btn btn-secondary" onclick="location.reload()" style="margin-top:16px;">🔄 Odśwież stronę</button>
+      </div>`;
+  }
+  
+  // Ukryj pływające przyciski mapy
+  document.querySelectorAll('.map-fab').forEach(btn => btn.style.display = 'none');
+  
+  // Automatycznie przełącz na zakładkę Trasa
+  setTimeout(() => switchTab('stops'), 500);
+  
+  showToast('⚠️ Mapa niedostępna - używaj zakładki Trasa', 'warning');
+}
+
 function updateTooltipVisibility(){
   if(!map) return;
   const zoom = map.getZoom();
@@ -1253,6 +1291,21 @@ function isAddressLine(l){
   if(!/(?:\D|^)\d{2}\s*[- ]?\s*\d{3}(?:\D|$)/.test(l)) return false;
   const digits = (l.match(/\d/g) || []).length;
   if(digits > l.length * 0.42) return false;
+  
+  // NOWE: Odrzuć linie które są tylko "coś krótkie, miasto, kod"
+  // np. "3A, Elbląg, 82300" lub "Gdański, 83000"
+  const parts = l.split(',').map(p => p.trim());
+  if(parts.length >= 2){
+    const firstPart = parts[0];
+    // Jeśli pierwsza część to tylko 1-2 słowa bez ulicy/nazwy, odrzuć
+    const words = firstPart.split(/\s+/).filter(w => w.length > 0);
+    if(words.length <= 2 && firstPart.length < 15){
+      // Sprawdź czy to wygląda na fragment adresu (np. "3A" lub "Gdański")
+      const looksLikeFragment = /^[\d\s]+[A-Za-z]?$/.test(firstPart) || /^[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż]+$/.test(firstPart);
+      if(looksLikeFragment) return false;
+    }
+  }
+  
   return true;
 }
 function isRecordStart(l){
@@ -1429,7 +1482,9 @@ async function geocodeGoogle(rawAddress){
         .trim();
       return { lat: place.geometry.location.lat, lng: place.geometry.location.lng, formatted: shortAddr, postal: extractPostalCode(shortAddr) };
     }
-  }catch(e){}
+  }catch(e){
+    console.error('geocodeGoogle error:', e);
+  }
   return null;
 }
 /* Nominatim zwraca surowy "display_name" — bardzo długi, z województwem/powiatem/dzielnicą,
@@ -1464,7 +1519,9 @@ async function geocodeNominatim(rawAddress){
       }
       return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), formatted: formatNominatimAddress(data[0]), postal: extractPostalCode(data[0].display_name) };
     }
-  }catch(e){}
+  }catch(e){
+    console.error('geocodeNominatim error:', e);
+  }
   return null;
 }
 async function geocodeSoft(rawAddress){
@@ -1493,9 +1550,12 @@ async function geocodeSoft(rawAddress){
         }
         return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), formatted: formatNominatimAddress(data[0]), postal: extractPostalCode(data[0].display_name), soft: true };
       }
-    }catch(e){}
+    }catch(e){
+      console.error('geocodeSoft Nominatim error:', e);
+    }
     await sleep(300);
   }
+  
   for(const query of queries){
     try{
       const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query)}&key=${GOOGLE_API_KEY}&language=pl&region=pl&components=country:PL`;
@@ -1506,7 +1566,9 @@ async function geocodeSoft(rawAddress){
         const place = data.results[0];
         return { lat: place.geometry.location.lat, lng: place.geometry.location.lng, formatted: place.formatted_address, postal: extractPostalCode(place.formatted_address), soft: true };
       }
-    }catch(e){}
+    }catch(e){
+      console.error('geocodeSoft Google error:', e);
+    }
     await sleep(300);
   }
   return null;
@@ -1527,17 +1589,27 @@ async function geocodeRegionFallback(){
   return null;
 }
 async function geocodeAddress(address){
-  let loc = await geocodeGoogle(address);
-  if(loc) return loc;
-  await sleep(800);
-  loc = await geocodeNominatim(address);
-  if(loc) return loc;
-  await sleep(800);
-  loc = await geocodeSoft(address);
-  if(loc) return loc;
-  await sleep(800);
-  if(dominantRegion){ loc = await geocodeRegionFallback(); if(loc) return loc; }
-  return null;
+  // Timeout 30 sekund dla całego geokodowania
+  const timeoutPromise = new Promise((resolve) => setTimeout(() => {
+    console.warn('⏱️ Geokodowanie przekroczyło limit czasu dla:', address);
+    resolve(null);
+  }, 30000));
+  
+  const geocodePromise = (async () => {
+    let loc = await geocodeGoogle(address);
+    if(loc) return loc;
+    await sleep(800);
+    loc = await geocodeNominatim(address);
+    if(loc) return loc;
+    await sleep(800);
+    loc = await geocodeSoft(address);
+    if(loc) return loc;
+    await sleep(800);
+    if(dominantRegion){ loc = await geocodeRegionFallback(); if(loc) return loc; }
+    return null;
+  })();
+  
+  return Promise.race([geocodePromise, timeoutPromise]);
 }
 async function reverseGeocode(lat, lng){
   try{
@@ -1923,7 +1995,38 @@ async function extractAndGeocode(text){
     const postalPrefix = postalCode ? postalCode.substring(0, 1) : null;
     const isSuspiciousRegion = postalPrefix && postalPrefix !== '8' && postalPrefix !== '7';
     
-    if(isDuplicate(loc.lat, loc.lng) || isTextDuplicate(c.name, loc.formatted)){
+    // SPRAWDŹ czy Google zwrócił samo miasto (brak ulicy/numeru)
+    // Usuń kod pocztowy przed sprawdzeniem
+    const addressWithoutPostal = loc.formatted.replace(/\d{2}-\d{3}/g, '').trim();
+    const hasStreetNumber = /\d+[a-zA-Z]?\b/.test(addressWithoutPostal);
+    const looksLikeCityOnly = !hasStreetNumber && loc.formatted.split(',').length <= 2;
+    
+    if(looksLikeCityOnly){
+      // Google zwrócił samo miasto - BŁĄD geokodowania, nie dodawaj!
+      candidatesWithIssues.set(idx, c);
+      row.className = 'candidate-item fail';
+      row.innerHTML = `<div style="flex:1;">
+        <div class="candidate-name">❌ ${escapeHtml(c.name)} - BRAK DOKŁADNEGO ADRESU${phoneSuffix}</div>
+        <div class="candidate-addr">Znaleziono tylko: "${escapeHtml(loc.formatted)}" <span style="color:var(--red);font-weight:700;">(brak ulicy)</span></div>
+        <div style="font-size:10px;color:var(--red);margin-top:4px;">
+          <b>OCR wykrył:</b> "${escapeHtml(c.query)}"<br>
+          <b>Nazwa:</b> "${escapeHtml(c.name)}"<br>
+          Google nie znalazł dokładnego adresu. Popraw ręcznie.
+        </div>
+      </div>
+      <div class="candidate-actions">
+        <button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw adres</button>
+      </div>`;
+      failedRows.push(row);
+      failed++;
+      continue;
+    }
+    
+    // Sprawdź duplikaty
+    const isDup = isDuplicate(loc.lat, loc.lng) || isTextDuplicate(c.name, loc.formatted);
+    
+    if(isDup){
+      // Prawdziwy duplikat (ten sam dokładny adres)
       row.className = 'candidate-item fail';
       row.innerHTML = `<div><div class="candidate-name">⚠️ duplikat</div><div class="candidate-addr">${escapeHtml(loc.formatted)}</div></div>`;
       failedRows.push(row);
@@ -1990,11 +2093,11 @@ async function extractAndGeocode(text){
     await sleep(150);
   }
   
-  // Dodaj wiersze w kolejności: podejrzane (czerwone) → niepewne (żółte) → normalne (zielone) → błędy
+  // Dodaj wiersze w kolejności: błędy (brak adresu) → podejrzane (czerwone) → niepewne (żółte) → normalne (zielone)
+  failedRows.forEach(r => resultBox.appendChild(r));
   suspiciousRows.forEach(r => resultBox.appendChild(r));
   uncertainRows.forEach(r => resultBox.appendChild(r));
   normalRows.forEach(r => resultBox.appendChild(r));
-  failedRows.forEach(r => resultBox.appendChild(r));
   
   showProgress(false);
   if(added > 0){
@@ -2603,6 +2706,7 @@ function exportListToClipboard(){
 
 /* Mapa */
 function updateMap(fit = true){
+  if(!map) return; // Tryb bez mapy
   markers.forEach(m => map.removeLayer(m));
   markers = [];
   markerByStopId.clear();
@@ -2925,24 +3029,23 @@ function openBatchInMaps(batchIdx){
   const container = document.getElementById(`batch-${batchIdx}-points`);
   const textareas = container.querySelectorAll('.route-addr-edit');
   
-  // Pobieramy adresy - dla osób prywatnych USUWAMY nazwisko z początku!
+  // Pobieramy adresy - USUWAMY NAZWY (firm i osób) z początku!
   const addresses = [];
   textareas.forEach((ta, idx) => {
     let addr = ta.value.trim();
     
-    // Sprawdź czy to adres zaczynający się od imienia i nazwiska (osoba prywatna)
+    // NOWA LOGIKA: Zawsze usuń pierwszą część przed przecinkiem (to nazwa firmy/osoby)
+    // Google Maps lepiej radzi sobie z czystym adresem: "Ulica Numer, Kod Miasto"
     const firstComma = addr.indexOf(',');
     if(firstComma > 0){
       const firstPart = addr.substring(0, firstComma).trim();
-      // Jeśli pierwsze słowo wygląda jak imię i nazwisko (2-3 słowa, bez cyfr, bez Sp. z o.o. itp)
-      const words = firstPart.split(/\s+/);
-      const hasDigits = /\d/.test(firstPart);
-      const isLegalEntity = /\b(sp\.?\s*z\s*o\.?\s*o\.?|s\.?\s*a\.?\b|sp\.?\s*j\.?\b|gmbh|ltd\.?\b)/i.test(firstPart);
+      const hasStreetNumber = /\d/.test(firstPart); // Czy ma numer domu?
       
-      if(words.length >= 2 && words.length <= 3 && !hasDigits && !isLegalEntity){
-        // To prawdopodobnie imię i nazwisko - USUŃ je, zostaw sam adres
+      if(!hasStreetNumber){
+        // Pierwsza część NIE ma numeru domu = to nazwa (firma/osoba), USUŃ
         addr = addr.substring(firstComma + 1).trim();
       }
+      // Jeśli ma numer domu to prawdopodobnie "Ulica 123" - zostaw
     }
     
     addresses.push(addr);
