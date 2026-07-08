@@ -336,6 +336,11 @@
     <div class="sub" id="cloudStatus">☁️ Łączenie...</div>
     <div class="sub">🧑‍✈️ <span id="courierNameDisplay">—</span> <a href="#" id="btnChangeCourier" style="color:#cfe0ff;text-decoration:underline;">(zmień)</a></div>
     <div class="sub" id="apiUsageBar" style="font-size:10px;">📊 —</div>
+    <div class="sub" style="font-size:10px;">
+      📝 <span id="problemsCount">0</span> problemów · 
+      <a href="#" onclick="exportGeocodingProblems(); return false;" style="color:#cfe0ff;text-decoration:underline;">📥 Eksportuj</a> · 
+      <a href="#" onclick="clearGeocodingProblems(); return false;" style="color:#cfe0ff;text-decoration:underline;">🗑️ Wyczyść</a>
+    </div>
   </div>
 
   <!-- Mobilne zakładki - zawsze widoczne na górze -->
@@ -735,6 +740,7 @@ document.addEventListener('DOMContentLoaded', () => {
   updateSheetPeekSummary();
   previewLayer = L.layerGroup().addTo(map);
   initContextMenu();
+  updateProblemsCounter(); // Inicjalizuj licznik problemów z geokodowaniem
 
   const savedCourier = localStorage.getItem('trasapro_courier_id');
   if(savedCourier){
@@ -1627,7 +1633,8 @@ async function geocodeGoogle(rawAddress){
             }
           }
           
-          // Jeśli nadal się nie zgadza - odrzuć
+          // Jeśli nadal się nie zgadza - odrzuć i zapisz problem
+          logGeocodingProblem(rawAddress, address, expectedPostal, `Błędny kod pocztowy: Google znalazł ${gotPostal} zamiast ${expectedPostal}`);
           return null;
         }
         
@@ -1832,12 +1839,101 @@ async function geocodeGoogle(rawAddress){
       }
     }
     
+    // Nie znaleziono żadnego rozwiązania - zapisz do logów problemów
+    logGeocodingProblem(rawAddress, address, expectedPostal, 'ZERO_RESULTS - wszystkie strategie zawiodły');
+    
     return null;
   } catch(err){
     console.error('Geocode error:', err);
+    logGeocodingProblem(rawAddress, address, expectedPostal, `ERROR: ${err.message}`);
     return null;
   }
 }
+/* System logowania problemów z geokodowaniem */
+function updateProblemsCounter(){
+  try {
+    const problems = JSON.parse(localStorage.getItem('geocoding_problems') || '[]');
+    const counter = document.getElementById('problemsCount');
+    if(counter) counter.textContent = problems.length;
+  } catch(err){
+    console.error('Nie udało się zaktualizować licznika problemów:', err);
+  }
+}
+
+function logGeocodingProblem(rawAddress, cleanedAddress, expectedPostal, reason){
+  try {
+    const problems = JSON.parse(localStorage.getItem('geocoding_problems') || '[]');
+    const timestamp = new Date().toISOString();
+    const username = localStorage.getItem('username') || 'nieznany';
+    
+    problems.push({
+      timestamp,
+      username,
+      rawAddress,
+      cleanedAddress,
+      expectedPostal,
+      reason
+    });
+    
+    // Zapisz tylko ostatnie 500 problemów (żeby nie zapchać localStorage)
+    if(problems.length > 500) problems.splice(0, problems.length - 500);
+    
+    localStorage.setItem('geocoding_problems', JSON.stringify(problems));
+    updateProblemsCounter();
+    console.log(`📝 Zapisano problem z geokodowaniem: "${rawAddress}" → ${reason}`);
+  } catch(err){
+    console.error('Nie udało się zapisać problemu z geokodowaniem:', err);
+  }
+}
+
+function exportGeocodingProblems(){
+  try {
+    const problems = JSON.parse(localStorage.getItem('geocoding_problems') || '[]');
+    if(problems.length === 0){
+      alert('Brak problemów z geokodowaniem do eksportu.');
+      return;
+    }
+    
+    // Przygotuj CSV z BOM dla poprawnego UTF-8 w Excelu
+    const BOM = '\uFEFF';
+    let csv = BOM + 'Data i godzina;Kurier;Oryginalny adres (OCR);Wyczyszczony adres;Kod pocztowy;Powód błędu\n';
+    
+    problems.forEach(p => {
+      // Format daty: YYYY-MM-DD HH:MM
+      const date = new Date(p.timestamp).toLocaleString('pl-PL', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      
+      csv += `${date};${p.username};${(p.rawAddress || '').replace(/;/g, ',')};${(p.cleanedAddress || '').replace(/;/g, ',')};${p.expectedPostal || 'brak'};${(p.reason || '').replace(/;/g, ',')}\n`;
+    });
+    
+    // Pobierz plik CSV
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `problemy_geokodowania_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    
+    console.log(`📥 Wyeksportowano ${problems.length} problemów z geokodowaniem`);
+    alert(`Wyeksportowano ${problems.length} problemów z geokodowaniem do pliku CSV.`);
+  } catch(err){
+    console.error('Błąd eksportu problemów:', err);
+    alert('Nie udało się wyeksportować problemów: ' + err.message);
+  }
+}
+
+function clearGeocodingProblems(){
+  if(confirm('Czy na pewno chcesz wyczyścić wszystkie zapisane problemy z geokodowaniem?')){
+    localStorage.removeItem('geocoding_problems');
+    updateProblemsCounter();
+    alert('Wyczyszczono logi problemów z geokodowaniem.');
+  }
+}
+
 /* Nominatim zwraca surowy "display_name" — bardzo długi, z województwem/powiatem/dzielnicą,
    i czasem w odwróconej kolejności (numer przed ulicą). To właśnie powodowało duplikaty typu
    "DWORCOWA 32, 32, Dworcowa, ...". Budujemy czysty, KRÓTKI adres ze strukturalnych pól (addressdetails=1). */
