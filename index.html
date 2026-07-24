@@ -448,6 +448,7 @@
               <button class="btn btn-secondary btn-sm" id="btnApplyOrder">✅ Ułóż trasę</button>
               <button class="btn btn-ghost btn-sm" id="btnExportList">📋 Kopiuj</button>
               <button class="btn btn-ghost btn-sm" id="btnExportCSV">📊 CSV</button>
+              <button class="btn btn-ghost btn-sm" id="btnShareRoute">🔗 Udostępnij</button>
               <button class="btn btn-danger btn-sm" id="btnClearAll">🗑️</button>
             </div>
           </div>
@@ -619,6 +620,7 @@
         <button class="map-fab" id="fabClearAllRoute" title="Wyczyść całą trasę">🗑️</button>
         <button class="map-fab" id="fabClearRoute" title="Usuń punkty z trasy (zostaw na mapie)">✖️</button>
         <button class="map-fab" id="fabArrangeRoute" title="Ułóż trasę">✅</button>
+        <button class="map-fab" id="fabShareRoute" title="Udostępnij trasę linkiem">🔗</button>
         <button class="map-fab map-fab-primary" id="fabAddStop" title="Dodaj punkt">➕</button>
       </div>
     </div>
@@ -752,6 +754,7 @@ let previewLayer = null;
 let contextMenuStopId = null;
 let centerPoint = null;
 let editingStopId = null;
+let pendingSharedRouteId = new URLSearchParams(location.search).get('share') || null;
 
 document.addEventListener('DOMContentLoaded', () => {
   initMap();
@@ -791,6 +794,11 @@ function startAsCourier(name){
   initCloudSync();
   initDispatcherSync();
   initApiUsageTracking();
+  if(pendingSharedRouteId){
+    const shareId = pendingSharedRouteId;
+    pendingSharedRouteId = null;
+    importSharedRoute(shareId);
+  }
 }
 function changeCourier(){
   if(!confirm('Zmienić kuriera? Bieżąca trasa na ekranie zostanie zamieniona na trasę nowego kuriera (własna trasa jest bezpieczna w chmurze).')) return;
@@ -882,6 +890,86 @@ function pushToCloud(state){
   if(!cloudDb || !courierId) return;
   cloudDb.collection(CLOUD_COLLECTION).doc(courierId).set(state)
     .catch(() => setCloudStatus('⚠️ Nie udało się zapisać w chmurze'));
+}
+
+/* Udostępnianie gotowej trasy linkiem — zapis snapshotu w osobnej kolekcji Firestore */
+const SHARE_COLLECTION = 'sharedRoutes';
+function generateShareId(){
+  return Math.random().toString(36).slice(2, 8) + Math.random().toString(36).slice(2, 6);
+}
+function ensureCloudDb(){
+  if(cloudDb) return cloudDb;
+  if(typeof firebase === 'undefined') return null;
+  if(!firebase.apps || !firebase.apps.length) firebase.initializeApp(firebaseConfig);
+  cloudDb = firebase.firestore();
+  return cloudDb;
+}
+async function shareRoute(){
+  const waypointCount = stops.filter(s => s.type === 'waypoint').length;
+  if(waypointCount === 0){ showToast('Brak punktów do udostępnienia', 'error'); return; }
+  const db = ensureCloudDb();
+  if(!db){ showToast('⚠️ Chmura niedostępna — nie można utworzyć linku', 'error'); return; }
+  try{
+    showToast('Tworzę link...');
+    const shareId = generateShareId();
+    await db.collection(SHARE_COLLECTION).doc(shareId).set({
+      stops, nextRouteIndex, returnToStartActive,
+      fromCourier: courierId || '',
+      createdAt: Date.now()
+    });
+    const url = new URL(location.href);
+    url.search = '';
+    url.searchParams.set('share', shareId);
+    const link = url.toString();
+    try{
+      await navigator.clipboard.writeText(link);
+      showToast('🔗 Link do trasy skopiowany — wyślij go innej osobie');
+    }catch(e){
+      prompt('Skopiuj link do trasy:', link);
+    }
+  }catch(e){
+    console.error('shareRoute error:', e);
+    if(e && e.code === 'permission-denied'){
+      showToast('⚠️ Brak uprawnień w Firestore do kolekcji "sharedRoutes" — dodaj regułę dla niej', 'error');
+    } else {
+      showToast('Nie udało się utworzyć linku do trasy: ' + (e && e.message ? e.message : 'nieznany błąd'), 'error');
+    }
+  }
+}
+async function importSharedRoute(shareId){
+  const db = ensureCloudDb();
+  if(!db){ showToast('⚠️ Chmura niedostępna — nie można wczytać udostępnionej trasy', 'error'); return; }
+  try{
+    const doc = await db.collection(SHARE_COLLECTION).doc(shareId).get();
+    if(!doc.exists){ showToast('Nie znaleziono udostępnionej trasy — link mógł wygasnąć', 'error'); return; }
+    const data = doc.data();
+    if(!data || !Array.isArray(data.stops)){ showToast('Uszkodzony link trasy', 'error'); return; }
+    const count = data.stops.filter(s => s.type === 'waypoint').length;
+    const ok = confirm(`Otrzymano gotową trasę${data.fromCourier ? ' od: ' + data.fromCourier : ''} (${count} punktów).\nZastąpić nią Twoją bieżącą trasę?`);
+    if(!ok) return;
+    suppressSave = true;
+    stops = data.stops;
+    stopCounter = stops.reduce((m, s) => Math.max(m, s.id || 0), 0);
+    nextRouteIndex = data.nextRouteIndex || stops.filter(s => s.type === 'waypoint').reduce((m, s) => Math.max(m, s.routeIndex || 0), 0);
+    returnToStartActive = !!data.returnToStartActive;
+    const rts = document.getElementById('returnToStart');
+    if(rts) rts.checked = returnToStartActive;
+    migrateRouteIndices();
+    suppressSave = false;
+    renderStops(); updateMap(true); calculateRoute(); saveState();
+    showToast('✅ Wczytano udostępnioną trasę');
+  }catch(e){
+    console.error('importSharedRoute error:', e);
+    if(e && e.code === 'permission-denied'){
+      showToast('⚠️ Brak uprawnień w Firestore do kolekcji "sharedRoutes" — dodaj regułę dla niej', 'error');
+    } else {
+      showToast('Błąd wczytywania udostępnionej trasy: ' + (e && e.message ? e.message : 'nieznany błąd'), 'error');
+    }
+  }finally{
+    const url = new URL(location.href);
+    url.searchParams.delete('share');
+    history.replaceState({}, '', url);
+  }
 }
 
 /* Widok dyspozytora — wszystkie trasy wszystkich kurierów na żywo */
@@ -1033,6 +1121,7 @@ function bindButtons(){
   document.getElementById('btnApplyOrder').addEventListener('click', applyOrder);
   document.getElementById('btnExportList').addEventListener('click', exportListToClipboard);
   document.getElementById('btnExportCSV').addEventListener('click', exportToCSV);
+  document.getElementById('btnShareRoute')?.addEventListener('click', shareRoute);
   document.getElementById('btnClearAll').addEventListener('click', clearAll);
   document.getElementById('btnProcessFiles').addEventListener('click', processAllFiles); // Tesseract
   document.getElementById('btnProcessVisionFiles')?.addEventListener('click', processVisionFiles); // Google Vision
@@ -1078,6 +1167,7 @@ function bindButtons(){
   document.getElementById('fabArrangeRoute')?.addEventListener('click', applyOrderGeo);  // Zawsze geograficznie
   document.getElementById('fabCenterMap')?.addEventListener('click', centerMapOnAllPoints);
   document.getElementById('fabOptimize')?.addEventListener('click', optimizeCurrentRoute);
+  document.getElementById('fabShareRoute')?.addEventListener('click', shareRoute);
   document.getElementById('fabAddStop')?.addEventListener('click', () => {
     // Na mobile: otwórz małe okno dialogowe zamiast całego panelu
     if(window.innerWidth <= 768){
@@ -3271,9 +3361,15 @@ async function addWaypoint(){
       softQuality: false,
       manuallyVerified: true  // Ręcznie dodany = zweryfikowany
     });
+    const newStop = stops[stops.length - 1];
     input.value = '';
-    renderStops(); updateMap();
-    showToast('Dodano na mapę — kliknij pinezkę, żeby dodać do trasy');
+    if(tryInsertIntoRoute(newStop)){
+      renderStops(); updateMap(false); calculateRoute(); saveState();
+      showToast(`Dodano do trasy na pozycji ${newStop.routeIndex} (zoptymalizowano)`);
+    } else {
+      renderStops(); updateMap();
+      showToast('Dodano na mapę — kliknij pinezkę, żeby dodać do trasy');
+    }
   } else { showToast('Nie znaleziono', 'error'); }
 }
 async function bulkAddAddresses(){
@@ -3307,11 +3403,12 @@ async function bulkAddAddresses(){
       softQuality: false,
       manuallyVerified: true  // Ręcznie dodany = zweryfikowany
     });
+    tryInsertIntoRoute(stops[stops.length - 1]);
     added++;
     await sleep(150);
   }
   textarea.value = failed.join('\n');
-  renderStops(); updateMap();
+  renderStops(); updateMap(); calculateRoute(); saveState();
   statusEl.textContent = failed.length
     ? `Dodano ${added}${skipped ? `, pominięto ${skipped} (duplikat)` : ''}. Nie znaleziono ${failed.length} — zostały w polu, popraw i spróbuj ponownie.`
     : `Dodano ${added}${skipped ? `, pominięto ${skipped} (duplikat)` : ''} — gotowe.`;
@@ -3367,6 +3464,76 @@ function applyOrderGeo(){
   applyGeoOrder();
 }
 
+// Lokalna poprawa kolejności (2-opt) — algorytm najbliższego sąsiada potrafi zostawić
+// "przeplatające się" odcinki trasy; 2-opt odwraca fragmenty, jeśli to skraca całość.
+// anchorBefore/anchorAfter to punkty stałe (START/koniec trasy/ostatni odwiedzony), które
+// same NIE są przestawiane, ale liczą się przy ocenie odległości na brzegach segmentu.
+function twoOptImprove(list, anchorBefore, anchorAfter){
+  if(list.length < 3) return list;
+  let arr = list.slice();
+  let improved = true, guard = 0;
+  while(improved && guard < 60){
+    improved = false;
+    guard++;
+    for(let i = 0; i < arr.length - 1; i++){
+      for(let j = i + 1; j < arr.length; j++){
+        const a = i === 0 ? anchorBefore : arr[i - 1];
+        const b = arr[i];
+        const c = arr[j];
+        const d = j === arr.length - 1 ? anchorAfter : arr[j + 1];
+        const before = (a ? haversine(a, b) : 0) + (d ? haversine(c, d) : 0);
+        const after = (a ? haversine(a, c) : 0) + (d ? haversine(b, d) : 0);
+        if(after + 1e-9 < before){
+          let lo = i, hi = j;
+          while(lo < hi){ const tmp = arr[lo]; arr[lo] = arr[hi]; arr[hi] = tmp; lo++; hi--; }
+          improved = true;
+        }
+      }
+    }
+  }
+  return arr;
+}
+
+// Jeśli trasa jest już ułożona, wstaw nowy punkt od razu we właściwe miejsce (najtańsza wstawka),
+// zamiast zostawiać go luzem na mapie. Zwraca true jeśli punkt został wstawiony do trasy.
+function tryInsertIntoRoute(stop){
+  const inRoute = stops.filter(s => s.type === 'waypoint' && s.routeIndex != null && s.lat != null && s.lng != null && s !== stop);
+  if(inRoute.length === 0) return false; // nie ma jeszcze ułożonej trasy — dodaj jako punkt luzem
+
+  inRoute.sort((a, b) => a.routeIndex - b.routeIndex);
+  const visitedCount = inRoute.filter(s => s.visited).length;
+  const fixedPrefix = inRoute.slice(0, visitedCount); // odwiedzone punkty — nie ruszamy ich kolejności
+  const movable = inRoute.slice(visitedCount); // punkty jeszcze do zrobienia — tu szukamy miejsca
+
+  const start = stops.find(s => s.type === 'start');
+  const end = stops.find(s => s.type === 'end');
+  const anchor = fixedPrefix.length > 0 ? fixedPrefix[fixedPrefix.length - 1] : start;
+
+  const seq = [];
+  if(anchor) seq.push(anchor);
+  seq.push(...movable);
+  if(end) seq.push(end);
+
+  let insertAt = movable.length; // domyślnie na koniec
+  if(seq.length >= 2){
+    let bestCost = Infinity, bestI = seq.length - 2;
+    for(let i = 0; i < seq.length - 1; i++){
+      const a = seq[i], b = seq[i + 1];
+      const cost = haversine(a, stop) + haversine(stop, b) - haversine(a, b);
+      if(cost < bestCost){ bestCost = cost; bestI = i; }
+    }
+    const offset = anchor ? 1 : 0;
+    insertAt = Math.max(0, Math.min(movable.length, bestI - offset + 1));
+  }
+  movable.splice(insertAt, 0, stop);
+
+  const polished = twoOptImprove(movable, anchor, end);
+  const newOrder = [...fixedPrefix, ...polished];
+  newOrder.forEach((s, i) => { s.routeIndex = i + 1; });
+  nextRouteIndex = newOrder.length;
+  return true;
+}
+
 // Wspólna logika optymalizacji geograficznej
 function applyGeoOrder(){
   const allWaypoints = stops.filter(s => s.type === 'waypoint' && s.lat && s.lng);
@@ -3414,47 +3581,36 @@ function applyGeoOrder(){
       remaining = remaining.filter(r => r !== nearest);
     }
     
-    ordered.forEach((s, i) => { s.routeIndex = i + 1; });
-    nextRouteIndex = ordered.length;
-    showToast(`Trasa zoptymalizowana od punktu "${ordered[0].name}" (${ordered.length} punktów)`);
-  } else {
-    // NOWA LOGIKA: Są punkty pending - dodaj je po ostatnim punkcie w trasie
-    
-    // Zachowaj punkty które już są w trasie
-    const ordered = [...alreadyInRoute];
-    
-    // Znajdź punkt startowy dla optymalizacji pending
-    let cursor = null;
+    let movablePart = twoOptImprove(ordered.slice(visited.length), visited.length > 0 ? visited[visited.length - 1] : (start || null), end || null);
+    const finalOrdered = [...visited, ...movablePart];
+    finalOrdered.forEach((s, i) => { s.routeIndex = i + 1; });
+    nextRouteIndex = finalOrdered.length;
+    showToast(`Trasa zoptymalizowana od punktu "${finalOrdered[0].name}" (${finalOrdered.length} punktów)`);
+  } else if(alreadyInRoute.length === 0){
+    // Nie ma jeszcze żadnej trasy — ułóż punkty pending od zera (najbliższy sąsiad)
     let remaining = [...pending];
-    
-    if(ordered.length > 0){
-      // Startuj od ostatniego punktu w trasie
-      cursor = ordered[ordered.length - 1];
-    } else if(start){
-      // Jeśli nie ma punktów w trasie, startuj od punktu START
-      cursor = start;
-    } else {
-      // Jeśli nie ma ani punktów w trasie ani START, weź pierwszy pending
-      cursor = remaining[0];
-      cursor.routeIndex = ++nextRouteIndex;
-      ordered.push(cursor);
-      remaining.shift();
-    }
-    
-    // Optymalizuj pozostałe pending punkty geograficznie
+    const ordered = [];
+    let cursor = start || remaining[0];
+    if(!start){ ordered.push(remaining.shift()); }
     while(remaining.length > 0){
       let nearest = remaining[0], nearestDist = haversine(cursor, nearest);
       for(let i = 1; i < remaining.length; i++){
         const d = haversine(cursor, remaining[i]);
         if(d < nearestDist){ nearestDist = d; nearest = remaining[i]; }
       }
-      nearest.routeIndex = ++nextRouteIndex;
       ordered.push(nearest);
       cursor = nearest;
       remaining = remaining.filter(r => r !== nearest);
     }
-    
-    showToast(`Dodano ${pending.length} punktów do trasy (od punktu "${ordered[alreadyInRoute.length > 0 ? alreadyInRoute.length - 1 : 0].name}")`);
+    const polished = twoOptImprove(ordered, start || null, end || null);
+    polished.forEach((s, i) => { s.routeIndex = i + 1; });
+    nextRouteIndex = polished.length;
+    showToast(`Ułożono trasę: ${polished.length} punktów`);
+  } else {
+    // NOWA LOGIKA: trasa już istnieje — wstaw każdy pending punkt tam, gdzie wydłuży
+    // trasę najmniej (może to być środek trasy, nie tylko jej koniec)
+    pending.forEach(p => tryInsertIntoRoute(p));
+    showToast(`Dodano ${pending.length} punktów do trasy w najlepszych miejscach`);
   }
   
   renderStops(); updateMap(false); calculateRoute(); saveState();
@@ -4384,6 +4540,7 @@ function optimizeCurrentRoute(){
   
   // Użyj geograficznej optymalizacji
   const start = stops.find(s => s.type === 'start');
+  const end = stops.find(s => s.type === 'end');
   const visited = inRoute.filter(s => s.visited);
   let remaining = inRoute.filter(s => !s.visited);
   const ordered = [...visited];
@@ -4409,14 +4566,16 @@ function optimizeCurrentRoute(){
     remaining = remaining.filter(r => r !== nearest);
   }
   
-  ordered.forEach((s, i) => { s.routeIndex = i + 1; });
-  nextRouteIndex = ordered.length;
+  const movablePart = twoOptImprove(ordered.slice(visited.length), visited.length > 0 ? visited[visited.length - 1] : (start || null), end || null);
+  const finalOrdered = [...visited, ...movablePart];
+  finalOrdered.forEach((s, i) => { s.routeIndex = i + 1; });
+  nextRouteIndex = finalOrdered.length;
   
   renderStops(); 
   updateMap(false); 
   calculateRoute(); 
   saveState();
-  showToast(`Trasa zoptymalizowana! (${ordered.length} punktów)`);
+  showToast(`Trasa zoptymalizowana! (${finalOrdered.length} punktów)`);
 }
 
 // Eksport do CSV
