@@ -4568,8 +4568,10 @@ function updateMap(fit = true){
     const inRoute = routePosById.has(stop.id);
     const isPending = stop.type === 'waypoint' && stop.routeIndex == null;
     const isDelivered = stop.type === 'waypoint' && stop.visited;
+    const isNewlyAdded = stop.isNewlyAdded === true; // Nowo dodany punkt
+    
     const color = stop.type === 'start' ? '#1a9c5c' : (stop.type === 'end' ? '#d93a3a' :
-      (isDelivered ? '#2fbf6e' : (isPending ? '#9aa3b5' : '#2957d8')));
+      (isDelivered ? '#2fbf6e' : (isPending ? '#9aa3b5' : (isNewlyAdded ? '#ff6b35' : '#2957d8')))); // Pomarańczowy dla nowego
     const label = isDelivered ? '✓' : (inRoute ? routePosById.get(stop.id) : (isPending ? '·' : ''));
     const icon = L.divIcon({
       className: 'custom-marker',
@@ -5210,7 +5212,8 @@ async function quickAddPoint(){
       isCompany: placeInfo.isCompany,
       googlePlaceName: placeInfo.googlePlaceName,
       googlePlaceId: placeInfo.googlePlaceId,
-      routeIndex: null
+      routeIndex: null,
+      isNewlyAdded: true // Flaga dla pulsującej pineški
     };
     
     stops.push(newStop);
@@ -5275,6 +5278,14 @@ async function quickAddPoint(){
       calculateRoute();
       saveState();
       showToast(`✅ ${wpName} - wstawiono w trasę (#${newStop.routeIndex})`);
+      
+      // Usuń flagę isNewlyAdded po 10 sekundach (przestanie pulsować)
+      setTimeout(() => {
+        if(newStop.isNewlyAdded) {
+          delete newStop.isNewlyAdded;
+          updateMap(false);
+        }
+      }, 10000);
     } else {
       // Brak trasy - zbuduj od zera
       await applyGeoOrder();
