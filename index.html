@@ -150,7 +150,7 @@
   /* Kontrolki zoomu (+/-) - przesunięcie w dół na mobile */
   @media (max-width: 768px) {
     .leaflet-top.leaflet-left {
-      top: 60px !important; /* Poniżej zakładek */
+      top: 74px !important; /* Poniżej zakładek */
     }
   }
   .leaflet-tooltip.address-label{background:rgba(255,255,255,0.9);border:1px solid #ddd;border-radius:4px;
@@ -338,34 +338,54 @@
       left:0;
       right:0;
       background:#fff;
-      border-bottom:none; /* USUNIĘTY szary pasek */
+      gap:4px;
+      border-bottom:1px solid #eef0f6;
       z-index:1400;
-      box-shadow:none; /* USUNIĘTY cień */
-      padding-top:env(safe-area-inset-top);
+      box-shadow:0 2px 10px rgba(20,30,60,.05);
+      padding:calc(env(safe-area-inset-top) + 6px) 6px 6px;
       pointer-events:auto;
     }
     .mobile-tabs .tab{
       flex:1;
-      padding:10px 4px; /* ZWIĘKSZONY padding - łatwiej klikać */
+      min-height:52px;
+      padding:6px 2px;
       background:transparent;
       border:none;
+      border-radius:14px;
       cursor:pointer;
-      font-size:11px; /* Trochę większa czcionka */
-      font-weight:600;
+      font-size:10.5px;
+      font-weight:700;
       color:var(--ink-soft);
-      border-bottom:3px solid transparent;
-      transition:.15s;
+      transition:transform .12s ease, background .18s ease, color .18s ease, box-shadow .18s ease;
       touch-action:manipulation;
       display:flex !important;
       align-items:center;
       justify-content:center;
       flex-direction:column;
+      gap:2px;
       pointer-events:auto;
+      -webkit-tap-highlight-color:transparent;
     }
-    .mobile-tabs .tab.active{color:var(--blue);border-top-color:var(--blue);background:#fff;} /* zmienione z border-bottom */
+    .mobile-tabs .tab .tab-icon{
+      font-size:19px;
+      line-height:1;
+      transition:transform .18s cubic-bezier(.34,1.56,.64,1);
+    }
+    .mobile-tabs .tab .tab-label{
+      letter-spacing:.1px;
+      opacity:.85;
+    }
+    .mobile-tabs .tab:active{transform:scale(.90);}
+    .mobile-tabs .tab.active{
+      color:#fff;
+      background:linear-gradient(135deg,var(--blue) 0%,var(--blue-dark) 100%);
+      box-shadow:0 4px 12px rgba(41,87,216,.35);
+    }
+    .mobile-tabs .tab.active .tab-icon{transform:scale(1.12) translateY(-1px);}
+    .mobile-tabs .tab.active .tab-label{opacity:1;}
     
     .sidebar{
-      position:fixed;top:calc(50px + 8px);bottom:0;left:0;width:87vw;max-width:360px;height:auto;
+      position:fixed;top:calc(64px + 8px);bottom:0;left:0;width:87vw;max-width:360px;height:auto;
       border-right:1px solid var(--line);border-top:none;
       box-shadow:6px 0 24px rgba(0,0,0,.2);
       transform:translateX(-100%);
@@ -474,11 +494,11 @@
 
   <!-- Mobilne zakładki - teraz NA GÓRZE dla łatwiejszego klikania -->
   <div class="mobile-tabs">
-    <button class="tab active" data-tab="stops">📍 Trasa</button>
-    <button class="tab" data-tab="vision">📄 Skan</button>
-    <button class="tab" data-tab="import">📱 Apka</button>
-    <button class="tab" data-tab="google">🗺️ Navi</button>
-    <button class="tab" data-tab="dispatcher">📋 Dysp</button>
+    <button class="tab active" data-tab="stops"><span class="tab-icon">📍</span><span class="tab-label">Trasa</span></button>
+    <button class="tab" data-tab="vision"><span class="tab-icon">📄</span><span class="tab-label">Skan</span></button>
+    <button class="tab" data-tab="import"><span class="tab-icon">📱</span><span class="tab-label">Apka</span></button>
+    <button class="tab" data-tab="google"><span class="tab-icon">🗺️</span><span class="tab-label">Navi</span></button>
+    <button class="tab" data-tab="dispatcher"><span class="tab-icon">📋</span><span class="tab-label">Dysp</span></button>
   </div>
 
   <div class="header">
@@ -830,7 +850,11 @@
   <div class="fix-dialog" id="setStartDialog">
     <div class="fix-dialog-box">
       <h3>🏠 Ustaw punkt startowy</h3>
-      <div class="desc">Wpisz adres magazynu lub bazy</div>
+      <div class="desc">Skąd zaczynasz dzisiejszą trasę?</div>
+      <button type="button" class="btn btn-sm btn-block" id="setStartUseLocation" style="margin-top:8px;background:#eef3ff;color:var(--blue);border:1px solid #cfe0ff;font-weight:700;">📍 Użyj mojej lokalizacji</button>
+      <div style="display:flex;align-items:center;gap:8px;margin:12px 0;color:#9aa3b5;font-size:11px;font-weight:600;">
+        <div style="flex:1;height:1px;background:#e4e8f2;"></div>lub wpisz adres<div style="flex:1;height:1px;background:#e4e8f2;"></div>
+      </div>
       <label>Adres startu</label>
       <input type="text" id="setStartInput" placeholder="np. Gdańsk, Magnacka 35" style="width:100%;padding:10px 12px;border:1px solid #ccd2e0;border-radius:8px;font-size:13px;margin-top:5px;">
       <div class="actions" style="margin-top:14px;">
@@ -924,6 +948,8 @@ function startAsCourier(name){
     const shareId = pendingSharedRouteId;
     pendingSharedRouteId = null;
     importSharedRoute(shareId);
+  } else if(!stops.some(s => s.type === 'start')){
+    setTimeout(() => openSetStartDialog(false), 400);
   }
 }
 function changeCourier(){
@@ -1297,6 +1323,7 @@ function bindButtons(){
   document.getElementById('setStartInput')?.addEventListener('keypress', e => {
     if(e.key === 'Enter') setStartFromDialog();
   });
+  document.getElementById('setStartUseLocation')?.addEventListener('click', setStartFromMyLocation);
 
   document.getElementById('returnToStart')?.addEventListener('change', e => {
     returnToStartActive = e.target.checked; calculateRoute(); saveState();
@@ -1305,12 +1332,7 @@ function bindButtons(){
     document.getElementById('headerDetails').classList.toggle('show');
   });
   document.getElementById('fabSetStart')?.addEventListener('click', () => {
-    // Pokaż dialog z autocomplete
-    const dialog = document.getElementById('setStartDialog');
-    if(dialog){
-      dialog.classList.add('show');
-      setTimeout(() => document.getElementById('setStartInput')?.focus(), 100);
-    }
+    openSetStartDialog(true);
   });
   document.getElementById('fabArrangeRoute')?.addEventListener('click', applyOrderGeo);
   document.getElementById('fabClearRoute')?.addEventListener('click', clearRouteOnly);
@@ -5296,6 +5318,26 @@ async function quickAddPoint(){
   }
 }
 
+function applyStartLocation(loc){
+  stops = stops.filter(s => s.type !== 'start');
+  stops.unshift({ 
+    id: ++stopCounter, 
+    type: 'start', 
+    name: '🏠 START', 
+    address: loc.formatted, 
+    phone:'', 
+    lat: loc.lat, 
+    lng: loc.lng, 
+    isEditing:false, 
+    visited:false,
+    softQuality: false,
+    manuallyVerified: true
+  });
+  renderStops(); 
+  updateMap(); 
+  calculateRoute();
+}
+
 async function setStartFromDialog(){
   const input = document.getElementById('setStartInput');
   const address = input.value.trim();
@@ -5308,28 +5350,37 @@ async function setStartFromDialog(){
   showProgress(false);
   
   if(loc){
-    stops = stops.filter(s => s.type !== 'start');
-    stops.unshift({ 
-      id: ++stopCounter, 
-      type: 'start', 
-      name: '🏠 START', 
-      address: loc.formatted, 
-      phone:'', 
-      lat: loc.lat, 
-      lng: loc.lng, 
-      isEditing:false, 
-      visited:false,
-      softQuality: false,
-      manuallyVerified: true
-    });
+    applyStartLocation(loc);
     input.value = '';
-    renderStops(); 
-    updateMap(); 
-    calculateRoute();
     showToast('Start ustawiony');
   } else {
     showToast('Nie znaleziono adresu', 'error');
   }
+}
+
+async function setStartFromMyLocation(){
+  document.getElementById('setStartDialog').classList.remove('show');
+  showProgress(true, 'Lokalizacja GPS...', 'Ustalanie Twojej pozycji');
+  const pos = await getCurrentPositionAsync();
+  if(!pos){
+    showProgress(false);
+    showToast('Brak dostępu do GPS — zezwól na lokalizację', 'error');
+    document.getElementById('setStartDialog').classList.add('show');
+    return;
+  }
+  const address = await reverseGeocode(pos.lat, pos.lng);
+  showProgress(false);
+  applyStartLocation({ lat: pos.lat, lng: pos.lng, formatted: address || `${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}` });
+  const input = document.getElementById('setStartInput');
+  if(input) input.value = '';
+  showToast('Start ustawiony z Twojej lokalizacji');
+}
+
+function openSetStartDialog(autofocus){
+  const dialog = document.getElementById('setStartDialog');
+  if(!dialog) return;
+  dialog.classList.add('show');
+  if(autofocus) setTimeout(() => document.getElementById('setStartInput')?.focus(), 100);
 }
 
 // Funkcje dla kandydatów z OCR
