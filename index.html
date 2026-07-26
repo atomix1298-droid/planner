@@ -324,7 +324,7 @@
     .header-details{
       display:none;
       position:fixed;
-      bottom:65px; /* Nad headerem */
+      bottom:var(--header-h, 65px); /* Nad headerem — wysokość liczona dynamicznie w JS */
       left:0;
       right:0;
       z-index:1299;
@@ -920,6 +920,15 @@ document.addEventListener('DOMContentLoaded', () => {
       navigator.serviceWorker.register('./sw.js').catch(err => console.warn('SW rejestracja nieudana:', err));
     });
   }
+  // Zmierz realną wysokość dolnego paska (różni się między przeglądarkami przez
+  // safe-area-inset), żeby panel "info" zawsze siadał dokładnie nad nim, bez szczeliny.
+  const syncHeaderHeight = () => {
+    const header = document.querySelector('.header');
+    if(header) document.documentElement.style.setProperty('--header-h', header.offsetHeight + 'px');
+  };
+  syncHeaderHeight();
+  window.addEventListener('resize', syncHeaderHeight);
+  window.addEventListener('orientationchange', () => setTimeout(syncHeaderHeight, 150));
   initMap();
   initTabs();
   initDragAndDrop();
