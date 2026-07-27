@@ -2270,6 +2270,25 @@ const PALLET_CODES = {
 /* === TRYB 2: Tesseract (screenshoty GEIS) - WSZYSTKIE ADRESY === */
 function extractCandidatesFromText_Tesseract(text){
 
+  // Mapowanie kodów nośników GEIS na wymiary (w metrach: długość × szerokość)
+  const geisCarrierSizes = {
+    'AM': { l: 1.2, w: 1.2, h: null, pm: 1.5 },     // PALETA 1,2 x 1,2 m
+    'DD': { l: 1.2, w: 1.6, h: null, pm: 2.0 },     // PALETA 1,2 x 1,6 m
+    'DP': { l: 0.8, w: 0.6, h: null, pm: 0.5 },     // PALETA 0,6 x 0,8 m
+    'DR': { l: 1.2, w: 0.8, h: null, pm: 1.0 },     // Domyślna europaleta
+    'EP': { l: 1.2, w: 0.8, h: null, pm: 1.0 },     // BEZZWROTNA PALETA (europaleta)
+    'EW': { l: 1.2, w: 0.8, h: null, pm: 1.0 },     // PALETA 1,2×1,1 m (aproksymacja)
+    'FP': { l: 0.8, w: 0.6, h: null, pm: 0.5 },     // EUROPALETA
+    'HP': { l: 1.2, w: 1.0, h: null, pm: 1.3 },     // PALETA 1,2 x 1,0 m
+    'IP': { l: 1.2, w: 1.0, h: null, pm: 1.3 },     // PRZEPÓŁOWIONA 120*90
+    'JL': { l: 0.8, w: 0.6, h: null, pm: 0.5 },     // PÓŁPALETA
+    'KP': { l: 2.0, w: 1.6, h: null, pm: 3.3 },     // Paleta 2,0×1,6
+    'NP': { l: 1.0, w: 2.0, h: null, pm: 2.2 },     // Paleta 1,0 x 2,0 m
+    'PL': { l: 1.2, w: 1.0, h: null, pm: 1.3 },     // PALETA 1,2 x 1,0 m
+    'TP': { l: 0.8, w: 0.6, h: null, pm: 0.5 },     // PALETA 3,0 x 0,8 m (aproksymacja na 1/4)
+    'VP': { l: 0.2, w: 0.2, h: null, pm: 0.05 },    // 1/4 PALETA
+  };
+
   let lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   
   console.log(`📋 OCR wykrył ${lines.length} linii tekstu`);
@@ -2397,6 +2416,38 @@ function extractCandidatesFromText_Tesseract(text){
     if(!/^\d{9,20}$/.test(line.trim()) || usedLineIdx.has(i)) continue;
     const context = lines.slice(Math.max(0, i - 3), i + 4).join(' ').toLowerCase();
     if(/przesy[łl]k|frankatura|odbier[cs]a\s*:|nadawca\s*:/.test(context)) continue;
+    
+    // Szukaj kodu nośnika (Nośn:) i masy w okolicy numeru trackingowego
+    let carrierCode = null;
+    let mass = null;
+    let dims = null;
+    let pm = null;
+    
+    for(let o = 1; o <= 6 && i + o < lines.length; o++){
+      const l = lines[i + o];
+      
+      // Przerwij jeśli trafiliśmy na kolejny numer trackingowy
+      if(/^\d{9,20}$/.test(l.trim())) break;
+      
+      // Szukaj pola "Nośn:" (może być zapisane jako "Nosn:", "Nośn:", "Nośn", etc.)
+      const carrierMatch = l.match(/No[sś]n[:\s]*([A-Z]{2,3})\b/i);
+      if(carrierMatch && !carrierCode){
+        carrierCode = carrierMatch[1].toUpperCase();
+        // Mapuj na wymiary według tabeli GEIS
+        if(geisCarrierSizes[carrierCode]){
+          const size = geisCarrierSizes[carrierCode];
+          dims = { l: size.l, w: size.w, h: size.h };
+          pm = size.pm;
+        }
+      }
+      
+      // Szukaj pola "Masa:" (waga w kg)
+      const massMatch = l.match(/Masa[:\s]*([0-9]+(?:[,.][0-9]+)?)/i);
+      if(massMatch && !mass){
+        mass = parseFloat(massMatch[1].replace(',', '.'));
+      }
+    }
+    
     let parts = [];
     for(let o = 1; o <= 4 && i + o < lines.length; o++){
       const l = lines[i + o];
@@ -2408,7 +2459,20 @@ function extractCandidatesFromText_Tesseract(text){
     const hasLetters = /[A-ZŻŹĆŃŁŚĄĘÓa-ząćęłńóśźż]{2,}/.test(full);
     if(full.length > 6 && hasLetters){
       const name = extractNameFromAddress(full);
-      candidates.push({ name, query: full, phone: '', source: 'ID_LIST', trackingNumber: line.trim() });
+      const candidate = { 
+        name, 
+        query: full, 
+        phone: '', 
+        source: 'ID_LIST', 
+        trackingNumber: line.trim() 
+      };
+      
+      // Dodaj wymiary i wagę jeśli znaleziono
+      if(dims) candidate.dims = dims;
+      if(pm) candidate.pm = pm;
+      if(mass) candidate.mass = mass;
+      
+      candidates.push(candidate);
     }
   }
   // Zlicz paczki/przesyłki dla każdego odbiorcy:
@@ -2421,10 +2485,41 @@ function extractCandidatesFromText_Tesseract(text){
     if(!seen.has(key)){
       c.packageCount = 1;
       c.trackingNumbers = c.trackingNumber ? [c.trackingNumber] : [];
+      c.items = []; // Przechowuj wszystkie paczki z wymiarami
+      
+      // Dodaj pierwszą paczkę do items jeśli ma wymiary
+      if(c.dims || c.pm || c.mass){
+        c.items.push({
+          dims: c.dims,
+          pm: c.pm || null,
+          mass: c.mass || null
+        });
+      }
+      
       seen.set(key, c);
       unique.push(c);
     } else {
       const existing = seen.get(key);
+      
+      // Dodaj wymiary tej paczki do items
+      if(c.dims || c.pm || c.mass){
+        existing.items.push({
+          dims: c.dims,
+          pm: c.pm || null,
+          mass: c.mass || null
+        });
+      }
+      
+      // Sumuj miejsca paletowe
+      if(c.pm){
+        existing.pm = (existing.pm || 0) + c.pm;
+      }
+      
+      // Sumuj wagę
+      if(c.mass){
+        existing.mass = (existing.mass || 0) + c.mass;
+      }
+      
       // Dodaj numer jeśli jest unikalny
       if(c.trackingNumber && !existing.trackingNumbers.includes(c.trackingNumber)){
         existing.trackingNumbers.push(c.trackingNumber);
