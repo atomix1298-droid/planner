@@ -163,8 +163,8 @@
     }
   }
   .leaflet-tooltip.address-label{background:rgba(255,255,255,0.95);border:1px solid #c7cde3;border-radius:5px;
-    padding:2px 7px;font-size:12px;font-weight:700;color:var(--ink);box-shadow:0 1px 4px rgba(0,0,0,.2);
-    max-width:180px;white-space:normal;line-height:1.25;}
+    padding:1px 5px;font-size:9.5px;font-weight:700;color:var(--ink);box-shadow:0 1px 4px rgba(0,0,0,.2);
+    max-width:150px;white-space:normal;line-height:1.2;}
 
   .google-routes{margin-top:12px;}
   .route-batch{background:#f8f9fc;border-radius:10px;padding:12px;margin-bottom:10px;border-left:3px solid var(--blue);}
@@ -5309,10 +5309,10 @@ function showPalletViz(stopId){
     const fw = Math.max(w * scale, 20);
     const fh = Math.max((h || 0.1) * scale, 20);
     const fd = Math.max(l * scale * 0.5, 12);
-    const pad = 40;
-    const svgW = fw + fd + pad;
-    const svgH = fh + fd + pad;
-    const ox = pad/2, oy = pad/2 + fd;
+    const padTop = 40, padRight = 14, padBottom = 28, padLeft = 54;
+    const svgW = fw + fd + padLeft + padRight;
+    const svgH = fh + fd + padTop + padBottom;
+    const ox = padLeft, oy = padTop + fd;
     
     const label = total > 1 ? `<text x="${svgW/2}" y="14" font-size="11" fill="#555" text-anchor="middle" font-weight="700">Paczka ${index + 1}/${total}</text>` : '';
     
@@ -5326,7 +5326,7 @@ function showPalletViz(stopId){
         <!-- front -->
         <rect x="${ox}" y="${oy}" width="${fw}" height="${fh}" fill="#eef7ee" stroke="#2e7d32" stroke-width="1.5"/>
         <text x="${ox+fw/2}" y="${oy+fh+16}" font-size="11" fill="#2e7d32" text-anchor="middle" font-weight="700">${w} m</text>
-        <text x="${ox-6}" y="${oy+fh/2}" font-size="11" fill="#2e7d32" text-anchor="end" font-weight="700">${h || '?'} m</text>
+        <text x="${ox-10}" y="${oy+fh/2}" font-size="11" fill="#2e7d32" text-anchor="end" font-weight="700">${h || '?'} m</text>
         <text x="${ox+fw+fd/2}" y="${oy-fd/2-4}" font-size="11" fill="#2e7d32" text-anchor="middle" font-weight="700">${l} m</text>
       </svg>`;
   }
