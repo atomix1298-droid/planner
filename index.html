@@ -139,7 +139,7 @@
   .stop-item.pending{border-style:dashed;background:#fafbfd;}
   .stop-item.pending .stop-title{color:var(--ink-soft);}
   .section-sub{font-size:11px;font-weight:700;color:var(--ink-soft);margin:14px 0 6px;}
-  .stop-title{flex:1;font-weight:700;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .stop-title{flex:1;font-weight:700;font-size:12px;line-height:1.4;overflow-wrap:break-word;}
   .stop-badge{font-size:8.5px;font-weight:700;padding:2px 5px;border-radius:20px;background:#eef2ff;color:var(--blue-dark);white-space:nowrap;}
   .stop-address{font-size:10.5px;color:var(--ink-soft);margin-left:29px;line-height:1.3;}
   .stop-phone{font-size:10px;color:var(--ink-soft);margin-left:29px;margin-top:2px;}
@@ -162,8 +162,9 @@
       top: 74px !important; /* Poniżej zakładek */
     }
   }
-  .leaflet-tooltip.address-label{background:rgba(255,255,255,0.9);border:1px solid #ddd;border-radius:4px;
-    padding:1px 5px;font-size:9px;font-weight:400;color:#555;box-shadow:0 1px 3px rgba(0,0,0,.1);}
+  .leaflet-tooltip.address-label{background:rgba(255,255,255,0.95);border:1px solid #c7cde3;border-radius:5px;
+    padding:2px 7px;font-size:12px;font-weight:700;color:var(--ink);box-shadow:0 1px 4px rgba(0,0,0,.2);
+    max-width:180px;white-space:normal;line-height:1.25;}
 
   .google-routes{margin-top:12px;}
   .route-batch{background:#f8f9fc;border-radius:10px;padding:12px;margin-bottom:10px;border-left:3px solid var(--blue);}
@@ -652,6 +653,9 @@
           <div class="raw-text-preview" id="rawTextVision"></div>
         </div>
 
+        <div style="margin-top:10px;padding:9px 11px;background:#fafbfe;border:1px solid #e4e8f2;border-radius:8px;font-size:11px;color:#556;line-height:1.7;">
+          🟡 — adres mniej pewny (sprawdź przed dojazdem) &nbsp; 🏢 — firma &nbsp; 🟧 PM — miejsca paletowe (europalety) z dokumentu załadunkowego
+        </div>
         <div id="candidatesResultVision" class="candidates-box"></div>
       </div>
 
@@ -679,6 +683,15 @@
         <div class="ocr-result hidden" id="ocrResult">
           <h4>📝 Ostatnio rozpoznany tekst</h4>
           <div class="raw-text-preview" id="rawText"></div>
+        </div>
+
+        <div style="margin-top:10px;padding:9px 11px;background:#fafbfe;border:1px solid #e4e8f2;border-radius:8px;font-size:11px;color:#556;line-height:1.7;">
+          <div style="font-weight:800;color:var(--ink);margin-bottom:3px;">Co oznaczają plakietki:</div>
+          🟡 — adres znaleziony, ale mniej pewny (przybliżenie/inny kod pocztowy niż w dokumencie) — sprawdź przed dojazdem<br>
+          ✅ — było niepewne, ale poprawione ręcznie<br>
+          🏢 — rozpoznano jako firma<br>
+          ⚠️ — kod pocztowy spoza regionu reszty trasy<br>
+          📦×2 — pod tym adresem/nazwą wykryto więcej niż jedną przesyłkę (ten sam odbiorca powtórzył się na liście)
         </div>
 
         <div id="candidatesResult" class="candidates-box"></div>
@@ -802,23 +815,26 @@
   <div class="fix-dialog" id="fixDialog">
     <div class="fix-dialog-box">
       <h3>✏️ Popraw adres</h3>
-      <div class="desc" id="fixDialogDesc">Adres OCR jest uszkodzony. Popraw:</div>
+      <div class="desc" id="fixDialogDesc">Nie udało się znaleźć adresu. Popraw:</div>
       <label>Nazwa odbiorcy</label>
       <input type="text" id="fixName">
-      <label>🔍 Ulica i numer (wpisz, pojawią się podpowiedzi)</label>
-      <input type="text" id="fixStreet" placeholder="Zacznij wpisywać, np. Morska 3...">
-      <label>Kod pocztowy (XX-XXX)</label>
-      <input type="text" id="fixPostal" maxlength="6" placeholder="84-107">
-      <label>🔍 Miasto / wieś (wpisz, pojawią się podpowiedzi)</label>
-      <input type="text" id="fixCity" placeholder="Zacznij wpisywać, np. Nowy Dwór...">
-      <div style="margin-top:10px;padding:8px;background:#f0f7ff;border-radius:6px;font-size:11px;">
-        <label style="margin-bottom:4px;display:block;">🏢 Nazwa firmy z Google (opcjonalne)</label>
-        <input type="text" id="fixGooglePlace" placeholder="np. MANGO Food & Bar" style="font-size:11px;">
-        <div style="font-size:10px;color:#666;margin-top:4px;">Jeśli to firma, wpisz jej nazwę z Google Maps. Zostanie zweryfikowana.</div>
-      </div>
+      <label>🔍 Adres (zacznij wpisywać, pojawią się podpowiedzi Google)</label>
+      <input type="text" id="fixAddress" placeholder="np. Tymawa 28, Gniew">
       <div class="actions">
         <button class="btn btn-sm btn-ghost" id="fixCancel">Anuluj</button>
         <button class="btn btn-sm btn-secondary" id="fixAccept" style="flex:2">Zatwierdź</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="fix-dialog" id="palletVizDialog">
+    <div class="fix-dialog-box" style="text-align:center;">
+      <h3>📐 Wymiary ładunku</h3>
+      <div id="palletVizName" style="font-weight:700;margin-bottom:6px;"></div>
+      <div id="palletVizSvg" style="display:flex;justify-content:center;margin:12px 0;"></div>
+      <div id="palletVizMeta" style="font-size:12px;color:#556;"></div>
+      <div class="actions" style="margin-top:14px;">
+        <button class="btn btn-sm btn-secondary" id="palletVizClose" style="flex:1">Zamknij</button>
       </div>
     </div>
   </div>
@@ -1299,7 +1315,11 @@ function bindButtons(){
   document.getElementById('btnProcessFiles')?.addEventListener('click', processAllFiles); // Tesseract
   document.getElementById('btnProcessVisionFiles')?.addEventListener('click', processVisionFiles); // Google Vision
   document.getElementById('btnGenGoogle')?.addEventListener('click', generateGoogleRoutes);
-  document.getElementById('fixCancel')?.addEventListener('click', () => document.getElementById('fixDialog').classList.remove('show'));
+  document.getElementById('fixCancel')?.addEventListener('click', () => {
+    document.getElementById('fixDialog').classList.remove('show');
+    fixDialogIdx = -1;
+    openNextFixDialogFromQueue();
+  });
   document.getElementById('fixAccept')?.addEventListener('click', acceptFixDialog);
   
   // Obsługa okna edycji punktu
@@ -1326,14 +1346,12 @@ function bindButtons(){
   const quickAddInputEl = document.getElementById('quickAddInput');
   const editDialogAddressEl = document.getElementById('editDialogAddress');
   const setStartInputEl = document.getElementById('setStartInput');
-  const fixStreetEl = document.getElementById('fixStreet');
-  const fixCityEl = document.getElementById('fixCity');
+  const fixAddressEl = document.getElementById('fixAddress');
   
   if(quickAddInputEl) attachPlacesAutocomplete(quickAddInputEl);
   if(editDialogAddressEl) attachPlacesAutocomplete(editDialogAddressEl);
   if(setStartInputEl) attachPlacesAutocomplete(setStartInputEl);
-  if(fixStreetEl) attachPlacesAutocomplete(fixStreetEl);
-  if(fixCityEl) attachPlacesAutocomplete(fixCityEl);
+  if(fixAddressEl) attachPlacesAutocomplete(fixAddressEl);
 
   // Obsługa dialogu "Ustaw start"
   document.getElementById('setStartCancel')?.addEventListener('click', () => {
@@ -1657,9 +1675,35 @@ async function extractAndGeocodeVision(text){
     
     if(!loc){
       candidatesWithIssues.set(idx, c);
+      queueFixDialog(idx, c); // Automatycznie otwórz okno poprawiania
       row.className = 'candidate-item fail';
+      row.setAttribute('data-candidate-idx', idx);
       row.innerHTML = `<div style="flex:1;"><div class="candidate-name">❌ ${escapeHtml(c.name)}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(c.query)}</div></div>
-        <div class="candidate-actions"><button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button></div>`;
+        <div class="candidate-actions">
+          <button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button>
+          <button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="removeCandidateRow(this)">🗑️ Usuń</button>
+        </div>`;
+      failedRows.push(row);
+      failed++;
+      continue;
+    }
+    // NOWA WALIDACJA: Sprawdź czy zwrócony adres zawiera ulicę
+    // Jeśli geocoding zwrócił tylko miasto (np. "83-300 Kartuzy") bez ulicy, traktuj jako błąd
+    console.log(`🔍 Sprawdzam czy adres ma ulicę: "${loc.formatted}"`);
+    const hasStreet = hasStreetInAddress(loc.formatted);
+    console.log(`🔍 hasStreetInAddress("${loc.formatted}") = ${hasStreet}`);
+    
+    if(!hasStreet){
+      console.warn(`⚠️ Geocoding zwrócił tylko miasto bez ulicy dla: ${c.query} → ${loc.formatted}`);
+      candidatesWithIssues.set(idx, c);
+      queueFixDialog(idx, c); // Automatycznie otwórz okno poprawiania
+      row.className = 'candidate-item fail';
+      row.setAttribute('data-candidate-idx', idx);
+      row.innerHTML = `<div style="flex:1;"><div class="candidate-name">🟡 ${escapeHtml(c.name)}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(c.query)} → <span style="color:#f39c12;">brak ulicy</span></div></div>
+        <div class="candidate-actions">
+          <button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button>
+          <button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="removeCandidateRow(this)">🗑️ Usuń</button>
+        </div>`;
       failedRows.push(row);
       failed++;
       continue;
@@ -1671,11 +1715,44 @@ async function extractAndGeocodeVision(text){
       duplicates++;
       continue;
     }
+    // Sprawdź czy kod pocztowy się zgadza (czy to na pewno ten sam region Polski)
+    const expectedPostal = extractPostalCode(c.query);
+    const gotPostal = extractPostalCode(loc.formatted);
+    
+    if(expectedPostal && gotPostal){
+      const expectedRegion = expectedPostal.substring(0, 2);
+      const gotRegion = gotPostal.substring(0, 2);
+      
+      if(expectedRegion !== gotRegion){
+        // UWAGA: Znaleziono adres w INNYM REGIONIE Polski - NIE DODAWAJ automatycznie!
+        console.warn(`⚠️ PODEJRZANY ADRES: Dokument ${expectedPostal}, Google ${gotPostal} dla "${loc.formatted}"`);
+        candidatesWithIssues.set(idx, c);
+        queueFixDialog(idx, c); // Automatycznie otwórz okno poprawiania
+        row.className = 'candidate-item fail';
+        row.setAttribute('data-candidate-idx', idx);
+        row.innerHTML = `<div style="flex:1;"><div class="candidate-name">⚠️ ${escapeHtml(c.name)}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(c.query)} → <span style="color:#f39c12;">zły kod ${expectedPostal}≠${gotPostal}</span></div></div>
+          <div class="candidate-actions">
+            <button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button>
+            <button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="removeCandidateRow(this)">🗑️ Usuń</button>
+          </div>`;
+        failedRows.push(row);
+        failed++;
+        continue; // NIE dodawaj do stops
+      }
+    }
+    
     const placeInfo = await resolveGooglePlace(c.name, loc.formatted, loc.lat, loc.lng);
-    stops.push({ id: ++stopCounter, type: 'waypoint', name: c.name || 'Odbiorca', address: loc.formatted, phone: c.phone || '', lat: loc.lat, lng: loc.lng, isEditing: false, visited: false, isCompany: placeInfo.isCompany, googlePlaceName: placeInfo.googlePlaceName, googlePlaceId: placeInfo.googlePlaceId, routeIndex: null });
+    stops.push({ id: ++stopCounter, type: 'waypoint', name: c.name || 'Odbiorca', address: loc.formatted, phone: c.phone || '', lat: loc.lat, lng: loc.lng, isEditing: false, visited: false, isCompany: placeInfo.isCompany, googlePlaceName: placeInfo.googlePlaceName, googlePlaceId: placeInfo.googlePlaceId, routeIndex: null, pm: c.pm || null, dims: c.dims || null, items: c.items || null, weightKg: c.weightKg || null, cargoQty: c.cargoQty || null, packageCount: c.packageCount || 1 });
     const companyBadge = placeInfo.isCompany ? ' 🏢' : '';
+    const pmBadge = c.pm ? ` <span style="background:#fff3e0;color:#b5651d;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;">🟧 PM ${c.pm}</span>` : '';
+    const dimsBadge = (c.items && c.items.length > 0) ? generateDimsBadges(c.items) : (c.dims ? ` <span style="background:#eef7ee;color:#2e7d32;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;">📐 ${c.dims.l}×${c.dims.w}×${c.dims.h}</span>` : '');
     row.className = 'candidate-item ok';
-    row.innerHTML = `<div style="flex:1;"><div class="candidate-name">✅ ${escapeHtml(c.name)}${companyBadge}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(loc.formatted)}</div></div>`;
+    row.setAttribute('data-stop-id', stopCounter);
+    row.innerHTML = `<div style="flex:1;"><div class="candidate-name">✅ ${escapeHtml(c.name)}${companyBadge}${pmBadge}${dimsBadge}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(loc.formatted)}</div></div>
+      <div class="candidate-actions">
+        <button class="btn btn-sm btn-warning" onclick="showEditDialog(${stopCounter})">✏️ Edytuj</button>
+        <button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="removeScanResultStop(${stopCounter})">🗑️ Usuń</button>
+      </div>`;
     successRows.push(row);
     added++;
     await sleep(150);
@@ -1695,6 +1772,9 @@ async function extractAndGeocodeVision(text){
   if(duplicates > 0) msg += ` | Pominięto ${duplicates}`;
   if(failed > 0) msg += ` | Nie znaleziono ${failed}`;
   showToast(msg, added > 0 ? 'success' : 'error');
+  
+  // Skan gotowy — jeśli są problematyczne adresy, od razu otwórz "Popraw" dla pierwszego
+  openNextFixDialogFromQueue();
 }
 
 /* OCR */
@@ -1766,6 +1846,7 @@ function cleanAddress(addr){
   // NAJPIERW napraw częste błędy OCR w nazwach ulic
   s = s.replace(/\bŚw\.\s*arzewsk/gi, 'Swarzewsk'); // Swarzewska → błędnie czytana jako "Św. arzewska"
   s = s.replace(/\bSw\.\s*arzewsk/gi, 'Swarzewsk');
+  s = s.replace(/\b(\d+)-GO\s+MAJA\b/gi, '$1 Maja'); // "3-GO MAJA" → "3 Maja"
   
   // Potem ogólne poprawki
   s = s.replace(/\bPolika\b/gi, 'Polska');
@@ -1988,38 +2069,131 @@ function extractCandidatesFromText_Vision(text){
         }
       }
     }
+// Nośniki/jednostki ładunkowe GEIS — kod (JŁ) -> wymiary podstawy (m) i mnożnik miejsca paletowego.
+// Wysokość (h) nieznana dla samej palety (zależy od towaru), więc nie podajemy jej tutaj.
+const PALLET_CODES = {
+  AM:  { l: 1.2, w: 1.2, mpl: 1.3, label: 'Paleta 1,2×1,2 m' },
+  DD:  { l: 1.6, w: 1.2, mpl: 1.9, label: 'Paleta 1,2×1,6 m' },
+  DP:  { l: 2.5, w: 0.8, mpl: 2,   label: 'Paleta 2,5×0,8 m' },
+  DR:  { mpl: 1.2, label: 'Przekracza EP (nietypowy gabaryt)' },
+  EP:  { l: 1.2, w: 0.8, mpl: 1,   label: 'Bezzwrotna paleta (europaleta)' },
+  EW:  { l: 1.2, w: 1.1, mpl: 1.3, label: 'Paleta 1,2×1,1 m' },
+  FP:  { l: 1.2, w: 0.8, mpl: 1,   label: 'Europaleta' },
+  H1:  { l: 1.3, w: 1.1, mpl: 1.4, label: 'Paleta 1,3×1,1 m' },
+  HP:  { l: 0.6, w: 0.8, mpl: 0.5, label: 'Półpaleta' },
+  IP:  { l: 1.2, w: 0.9, mpl: 1.3, label: 'Przemysłowa 120×90' },
+  NP:  { l: 1.0, w: 2.0, mpl: 2.2, label: 'Paleta 1,0×2,0 m' },
+  PL:  { l: 1.2, w: 1.0, mpl: 1.3, label: 'Paleta 1,2×1,0 m' },
+  TP:  { l: 3.0, w: 0.8, mpl: 3,   label: 'Paleta 3,0×0,8 m' },
+  VP:  { mpl: 0.2, label: '1/4 palety' },
+  BL:  { mpl: 0.5, label: 'Bl' },
+  BU:  { l: 3, w: 0.1, label: 'Wiązka/dłużyca do 50 kg' },
+  CC:  { label: 'Karton/towar niespaletyzowany' },
+  GE:  { l: 1.2, w: 0.8, mpl: 3, label: 'Zwrotna, gabaryt' },
+  GP:  { l: 1.2, w: 0.8, label: 'Kosz metalowy/siatkowy' },
+  GS:  { mpl: 1, label: 'Gs' },
+  IBC: { mpl: 1, label: 'Zbiornik na palecie' },
+  KB:  { l: 1.2, w: 0.9, mpl: 0.5, label: 'Materac' },
+  KH:  { l: 0.8, w: 0.6, mpl: 0.5, label: 'Kh' },
+  KT:  { label: 'Karton do 30 kg' },
+  NEP: { label: 'Towar nieokreślony' },
+  PA:  { mpl: 0.5, label: 'Paczka' },
+  PC:  { label: 'Paleta CHEP' },
+  PEP: { l: 1.3, w: 0.9, mpl: 1.22, label: 'Pep' },
+  RC:  { mpl: 1, label: 'Stojak' },
+  SB:  { l: 1.2, w: 1.0, mpl: 1.5, label: 'Zbiornik/mauser na palecie' },
+  SP:  { mpl: 1, label: 'Standard międzynarodowy' },
+  UV:  { mpl: 0.5, label: 'Gabaryt luzem' }
+};
+
     if(odbiorcaIdx < 0 || usedLineIdx.has(odbiorcaIdx)) return;
     usedLineIdx.add(odbiorcaIdx);
     const addr = cleanAddress(lines[odbiorcaIdx]);
     const name = extractNameFromAddress_Vision(addr);
     const phone = findPhoneNear_Vision(odbiorcaIdx, lines);
-    candidates.push({ name, query: addr, phone, source: 'DOK_ZAL' });
+    // PM: miejsce paletowe (np. "PM: 0.5", "PM: 1", "PM: 1.5") — z dokumentów załadunkowych typu GEIS.
+    let pm = null;
+    let dims = null;
+    let cargoQty = null;
+    for(let j = win.from; j < win.to; j++){
+      const pmMatch = lines[j].match(/\bPM\s*:?\s*([\d]+[.,]?[\d]*)/i);
+      if(pmMatch && !pm) pm = pmMatch[1].replace(',', '.');
+      // Wiersz tabeli "Ilość JŁ": np. "1  HP" — ilość + kod nośnika, samo w linii.
+      const codeMatch = lines[j].match(/^(\d+)\s+([A-Z]{2,4})$/);
+      if(codeMatch && !dims){
+        const code = codeMatch[2];
+        if(PALLET_CODES[code]){
+          const pc = PALLET_CODES[code];
+          if(pc.l && pc.w) dims = { l: pc.l, w: pc.w, h: null, code, label: pc.label };
+          cargoQty = `${codeMatch[1]} ${code}`;
+        }
+      }
+    }
+    candidates.push({ name, query: addr, phone, source: 'DOK_ZAL', pm, dims, cargoQty });
   });
 
   // Strategia 2: (KLIENT) — SUS
   for(let i = 0; i < lines.length; i++){
     const line = lines[i];
     if(!line.includes('(KLIENT)') || usedLineIdx.has(i)) continue;
-    const nameMatch = line.match(/\(KLIENT\)\s*([^;,\n]+)/i);
-    const name = nameMatch ? nameMatch[1].trim() : 'Odbiorca';
-    let addrParts = []; let phone = '';
-    const afterName = line.split(/\(KLIENT\)[^;]*;?/i)[1];
-    if(afterName && afterName.trim().length > 2) addrParts.push(afterName.trim());
-    let addressDone = /\d{2}\s*-?\s*\d{3}/.test(afterName || '');
-    for(let o = 1; o <= 3 && i + o < lines.length; o++){
+    
+    // Złącz linijki tego rekordu w jeden ciąg (nazwa firmy/klienta czasem łamie się na 2-3 linijki),
+    // zatrzymując się na nagłówku tabeli albo kolejnym "(KLIENT)".
+    const recordLines = [];
+    for(let o = 0; o <= 3 && i + o < lines.length; o++){
       const l = lines[i + o];
-      if(isFieldJunk_Vision(l) || isDocumentHeader_Vision(l)) continue;
-      const telMatch = l.match(/tel\.?:?\s*\+?(\d[\d\s\-\.]{7,})/i);
-      if(telMatch && !phone){ const t = ('+' + telMatch[1]).replace(/[\s\-\.]/g,''); if(t.length >= 9) phone = t; }
-      if(!addressDone){
-        const cleanPart = l.replace(/tel\.?:?.*$/i,'').trim();
-        if(cleanPart && cleanPart.length > 2) addrParts.push(cleanPart);
-        if(/\d{2}\s*-?\s*\d{3}/.test(l)) addressDone = true;
-      }
-      if(phone && addressDone) break;
+      if(o > 0 && (isFieldJunk_Vision(l) || isDocumentHeader_Vision(l) || l.includes('(KLIENT)'))) break;
+      recordLines.push(l);
     }
-    const query = cleanAddress([name, ...addrParts].join(', ').replace(/;/g,',').replace(/,\s*,/g,',').replace(/,\s*$/,''));
-    if(query.length > 8) candidates.push({ name, query, phone, source: 'KLIENT' });
+    let full = recordLines.join(' ').replace(/\(KLIENT\)\s*/i, '');
+    
+    const telMatch = full.match(/tel\.?:?\s*\+?(\d[\d\s\-\.]{7,})/i);
+    const phone = (telMatch && ('+' + telMatch[1]).replace(/[\s\-\.]/g,'').length >= 9) ? ('+' + telMatch[1]).replace(/[\s\-\.]/g,'') : '';
+    // Odetnij telefon i samotne "PL" (kraj) z końca — nie są częścią adresu do geokodowania
+    full = full.replace(/tel\.?:?.*$/i, '').replace(/;?\s*,?\s*PL\s*;?\s*,?\s*$/i, '').trim();
+    
+    // SUUS rozdziela pola średnikiem, ale OCR czasem czyta go jako przecinek — dzielimy po obu naraz.
+    const parts = full.split(/[;,]/).map(p => p.trim()).filter(p => p.length > 0);
+    const name = parts[0] || 'Odbiorca';
+    const addrParts = parts.slice(1);
+    
+    const query = cleanAddress([name, ...addrParts].join(', ').replace(/,\s*,/g,',').replace(/,\s*$/,''));
+    
+    // FILTR: Ignoruj magazyny/załadunek - NIE DODAWAJ jako odbiorcę!
+    const isWarehouse = /Magnacka\s*35|7R\s*Park\s*Gda[nń]sk|ROHLIG|SUUS/i.test(query);
+    const isLoading = full.toLowerCase().includes('załadunek') || full.toLowerCase().includes('(gdy)');
+    if(isWarehouse || isLoading){
+      console.log(`⏭️ Pomijam magazyn/załadunek: ${query}`);
+      continue; // Pomiń ten adres
+    }
+    
+    // Szukaj WSZYSTKICH wierszy towaru (LP) w tabeli tego rekordu (do kolejnego "(KLIENT)" albo 30 linii) —
+    // jedna dostawa może mieć kilka pozycji o różnych wymiarach (np. 2 palety różnej wielkości).
+    let searchEnd = lines.length;
+    for(let k = i + 1; k < lines.length; k++){ if(lines[k].includes('(KLIENT)')){ searchEnd = k; break; } }
+    searchEnd = Math.min(searchEnd, i + 30);
+    const block = lines.slice(i, searchEnd).join(' ');
+    const dimRe = /(\d+[.,]?\d*)\s*[x×]\s*(\d+[.,]?\d*)\s*[x×]\s*(\d+[.,]?\d*)/g;
+    const items = [];
+    let dm;
+    while((dm = dimRe.exec(block)) !== null){
+      // Szukaj wagi i typu ładunku w pobliżu tego konkretnego dopasowania wymiarów (do 60 znaków dalej)
+      const nearby = block.slice(dm.index, dm.index + 80);
+      const wMatch = nearby.match(/(\d+[.,]?\d*)\s*kg\b/i);
+      const qMatch = block.slice(Math.max(0, dm.index - 30), dm.index).match(/\b(\d+)\s*(DHP|PAL|EUR|JED|EP|HP|PEP|AM)\b/i);
+      items.push({
+        l: parseFloat(dm[1].replace(',','.')), w: parseFloat(dm[2].replace(',','.')), h: parseFloat(dm[3].replace(',','.')),
+        weightKg: wMatch ? parseFloat(wMatch[1].replace(',','.')) : null,
+        qty: qMatch ? `${qMatch[1]} ${qMatch[2].toUpperCase()}` : null
+      });
+    }
+    const dims = items[0] || null; // dla wstecznej zgodności (pojedyncza plakietka)
+    const weightKg = dims ? dims.weightKg : null;
+    const cargoQty = dims ? dims.qty : null;
+    
+    console.log(`📦 "${name}" znaleziono ${items.length} wymiarów:`, items);
+    
+    if(query.length > 8) candidates.push({ name, query, phone, source: 'KLIENT', dims, weightKg, cargoQty, items });
   }
 
   // Strategia 3: Odbiorca: / Odbiersa: / Dbiorca:
@@ -2069,12 +2243,26 @@ function extractCandidatesFromText_Vision(text){
     }
   }
 
-  // Deduplikacja
-  const seen = new Set();
+  // Deduplikacja — ale zamiast wyrzucać powtórki, zlicz je i połącz pozycje (items),
+  // bo ten sam odbiorca może mieć kilka osobnych dostaw/palet o różnych wymiarach.
+  const seen = new Map();
   const unique = [];
   for(const c of candidates){
     const key = c.query.toLowerCase().replace(/[\s,:.\-]/g,'');
-    if(!seen.has(key)){ seen.add(key); unique.push(c); }
+    if(!seen.has(key)){
+      c.packageCount = (c.items && c.items.length > 1) ? c.items.length : 1;
+      seen.set(key, c);
+      unique.push(c);
+    } else {
+      const existing = seen.get(key);
+      const incomingItems = (c.items && c.items.length > 0) ? c.items : (c.dims ? [{ ...c.dims, weightKg: c.weightKg, qty: c.cargoQty }] : []);
+      if(incomingItems.length > 0){
+        existing.items = (existing.items && existing.items.length > 0) ? existing.items : (existing.dims ? [{ ...existing.dims, weightKg: existing.weightKg, qty: existing.cargoQty }] : []);
+        existing.items.push(...incomingItems);
+        if(!existing.dims) existing.dims = existing.items[0];
+      }
+      existing.packageCount = (existing.packageCount || 1) + ((c.items && c.items.length > 1) ? c.items.length : 1);
+    }
   }
   return unique;
 }
@@ -2131,6 +2319,12 @@ function extractCandidatesFromText_Tesseract(text){
     }
   }
   windows.forEach((win) => {
+    // Wyciągnij numer przesyłki z początku okna (separator)
+    let trackingNumber = null;
+    if(win.from > 0 && isRecordStart(lines[win.from])){
+      trackingNumber = lines[win.from].trim();
+    }
+    
     for(let j = win.from; j < win.to; j++){
       if(isDocumentHeader(lines[j]) || isFieldJunk(lines[j])) continue;
       const passedAddressLine = isAddressLine(lines[j]);
@@ -2146,8 +2340,8 @@ function extractCandidatesFromText_Tesseract(text){
       const addr = cleanAddress(lines[j]);
       const name = extractNameFromAddress(addr);
       const phone = findPhoneNear(j, lines);
-      console.log(`➕ Dodano kandydata: "${name}" - query: "${addr}"`);
-      candidates.push({ name, query: addr, phone, source: 'DOK_ZAL' });
+      console.log(`➕ Dodano kandydata: "${name}" - query: "${addr}" - tracking: ${trackingNumber}`);
+      candidates.push({ name, query: addr, phone, source: 'DOK_ZAL', trackingNumber });
     }
   });
   for(let i = 0; i < lines.length; i++){
@@ -2214,14 +2408,52 @@ function extractCandidatesFromText_Tesseract(text){
     const hasLetters = /[A-ZŻŹĆŃŁŚĄĘÓa-ząćęłńóśźż]{2,}/.test(full);
     if(full.length > 6 && hasLetters){
       const name = extractNameFromAddress(full);
-      candidates.push({ name, query: full, phone: '', source: 'ID_LIST' });
+      candidates.push({ name, query: full, phone: '', source: 'ID_LIST', trackingNumber: line.trim() });
     }
   }
-  const seen = new Set();
+  // Zlicz paczki/przesyłki dla każdego odbiorcy:
+  // Logika: jeśli numery różnią się tylko ostatnią cyfrą (01,02,03,04) → to PACZKI w jednej przesyłce
+  //         jeśli numery są zupełnie różne → to osobne PRZESYŁKI
+  const seen = new Map();
   const unique = [];
   for(const c of candidates){
     const key = c.query.toLowerCase().replace(/[\s,:.\-]/g,'');
-    if(!seen.has(key)){ seen.add(key); unique.push(c); }
+    if(!seen.has(key)){
+      c.packageCount = 1;
+      c.trackingNumbers = c.trackingNumber ? [c.trackingNumber] : [];
+      seen.set(key, c);
+      unique.push(c);
+    } else {
+      const existing = seen.get(key);
+      // Dodaj numer jeśli jest unikalny
+      if(c.trackingNumber && !existing.trackingNumbers.includes(c.trackingNumber)){
+        existing.trackingNumbers.push(c.trackingNumber);
+      }
+      
+      // LICZENIE: grupuj numery po "podstawie" (bez ostatniej cyfry)
+      if(existing.trackingNumbers.length > 0){
+        const groups = new Map(); // key = podstawa numeru (bez ostatniej cyfry), value = liczba
+        for(const num of existing.trackingNumbers){
+          const base = num.slice(0, -1); // Wszystko oprócz ostatniej cyfry
+          groups.set(base, (groups.get(base) || 0) + 1);
+        }
+        
+        // Jeśli wszystkie numery mają TĘ SAMĄ podstawę → to paczki (📦)
+        // Jeśli są różne podstawy → to przesyłki (🚚)
+        if(groups.size === 1){
+          // Jedna grupa = paczki w jednej przesyłce
+          existing.packageCount = existing.trackingNumbers.length;
+          existing.isMultiPackage = true; // Oznacz jako paczki (nie przesyłki)
+        } else {
+          // Wiele grup = osobne przesyłki
+          existing.packageCount = existing.trackingNumbers.length;
+          existing.isMultiShipment = true; // Oznacz jako przesyłki (nie paczki)
+        }
+      } else {
+        // Brak numerów - zwiększ licznik jak wcześniej
+        existing.packageCount = (existing.packageCount || 1) + 1;
+      }
+    }
   }
   
   // FILTR: Usuń "śmieciowe" miasta (tylko nazwa + kod, bez ulicy)
@@ -2260,9 +2492,12 @@ async function geocodeGoogle(rawAddress){
   
   console.log(`📍 Geokodowanie: "${rawAddress}" → "${address}" (oczekiwany kod: ${expectedPostal})`);
   
-  // Spróbuj najpierw z oryginalnym adresem
+  // UWAGA: nie filtrujemy już po stronie Google przez components=postal_code —
+  // kody pocztowe w dokumentach kurierskich (zwłaszcza dla małych wsi) bywają
+  // nieaktualne/inne niż oficjalne, a twardy filtr Google potrafił przez to
+  // odrzucić prawidłowy wynik (ZERO_RESULTS mimo że miejscowość istnieje).
+  // Kod pocztowy jest teraz tylko sygnałem informacyjnym, nie blokadą.
   let url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_API_KEY}&language=pl&region=pl`;
-  if(expectedPostal) url += `&components=country:PL|postal_code:${encodeURIComponent(expectedPostal)}`;
   
   try{
     const res = await fetch(url);
@@ -2275,59 +2510,35 @@ async function geocodeGoogle(rawAddress){
       const place = data.results[0];
       if(place.types.includes('country')) return null;
       
-      // Sprawdź kod pocztowy
-      if(expectedPostal){
-        const gotPostal = extractPostalCode(place.formatted_address);
-        if(gotPostal && gotPostal !== expectedPostal){
-          // Kod pocztowy się nie zgadza - spróbuj z samą ulicą + kodem pocztowym
-          console.log(`⚠️ Kod pocztowy się nie zgadza: oczekiwano ${expectedPostal}, dostano ${gotPostal} - próbuję tylko ulica + kod`);
-          
-          const street = extractStreetWithNumber(address);
-          if(street){
-            const simpleQuery = `${street}, ${expectedPostal}, Polska`;
-            console.log(`🔧 Próbuję: "${simpleQuery}"`);
-            
-            const simpleUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(simpleQuery)}&key=${GOOGLE_API_KEY}&language=pl&region=pl`;
-            const simpleRes = await fetch(simpleUrl);
-            const simpleData = await simpleRes.json();
-            incrementApiUsage('geocoding');
-            
-            if(simpleData.status === 'OK' && simpleData.results.length > 0){
-              const simplePlace = simpleData.results[0];
-              const simplePostal = extractPostalCode(simplePlace.formatted_address);
-              if(simplePostal && simplePostal === expectedPostal){
-                console.log(`✅ Znaleziono z ulica + kod: "${simplePlace.formatted_address}"`);
-                return { 
-                  formatted: simplePlace.formatted_address, 
-                  lat: simplePlace.geometry.location.lat, 
-                  lng: simplePlace.geometry.location.lng,
-                  soft: false
-                };
-              }
-            }
-          }
-          
-          // Jeśli nadal się nie zgadza - odrzuć i zapisz problem
-          logGeocodingProblem(rawAddress, address, expectedPostal, `Błędny kod pocztowy: Google znalazł ${gotPostal} zamiast ${expectedPostal}`);
-          return null;
+      const gotPostal = extractPostalCode(place.formatted_address);
+      
+      // TWARDA WALIDACJA: Jeśli REGION (pierwsze 2 cyfry) się różni, to ODRZUĆ
+      if(expectedPostal && gotPostal){
+        const expectedRegion = expectedPostal.substring(0, 2);
+        const gotRegion = gotPostal.substring(0, 2);
+        
+        if(expectedRegion !== gotRegion){
+          console.log(`❌ ODRZUCAM: Region się nie zgadza (${expectedRegion} ≠ ${gotRegion}). Dokument: ${expectedPostal}, Google: ${gotPostal} dla "${place.formatted_address}"`);
+          return null; // Odrzuć, Google znalazł zupełnie inne miejsce (inny region Polski)
         }
         
-        // Kod pocztowy się zgadza - zwróć wynik
-        return { 
-          formatted: place.formatted_address, 
-          lat: place.geometry.location.lat, 
-          lng: place.geometry.location.lng,
-          soft: false
-        };
-      } else {
-        // Brak oczekiwanego kodu pocztowego - zwróć wynik
-        return { 
-          formatted: place.formatted_address, 
-          lat: place.geometry.location.lat, 
-          lng: place.geometry.location.lng,
-          soft: false
-        };
+        // Akceptuj różnice w ostatniej cyfrze (83-300 vs 83-310 = OK, to samo miasto/okolica)
+        if(expectedPostal !== gotPostal){
+          console.log(`⚠️ Kod pocztowy się różni ale REGION OK: dokument ${expectedPostal}, Google ${gotPostal} dla "${place.formatted_address}" — akceptuję`);
+        }
       }
+      
+      const postalMismatch = !!(expectedPostal && gotPostal && gotPostal !== expectedPostal);
+      
+      return { 
+        formatted: place.formatted_address, 
+        lat: place.geometry.location.lat, 
+        lng: place.geometry.location.lng,
+        soft: false,
+        postalMismatch,
+        expectedPostal: postalMismatch ? expectedPostal : null,
+        gotPostal: postalMismatch ? gotPostal : null
+      };
     }
     
     // Jeśli nie znaleziono - spróbuj naprawić częste błędy OCR w nazwie ulicy
@@ -2719,17 +2930,52 @@ function formatNominatimAddress(item){
 async function geocodeNominatim(rawAddress){
   const address = cleanAddress(rawAddress);
   const expectedPostal = extractPostalCode(address);
-  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=pl&addressdetails=1&q=${encodeURIComponent(address)}`;
+  // Szukaj bez kodu pocztowego w tekście zapytania — kod z dokumentu bywa nieaktualny
+  // dla małych miejscowości i tylko myli wyszukiwarkę pełnotekstową Nominatim.
+  const queryAddress = expectedPostal ? address.replace(expectedPostal.replace('-', '[- ]?'), '').replace(/,\s*,/g, ',').replace(/,\s*$/, '').trim() : address;
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=pl&addressdetails=1&q=${encodeURIComponent(queryAddress)}`;
   try{
     const res = await fetch(url, { headers: { 'Accept-Language': 'pl' } });
     const data = await res.json();
     if(data && data.length > 0){
       for(const cand of data){
         const gotPostal = extractPostalCode(cand.display_name);
+        
+        // TWARDA WALIDACJA: Jeśli REGION (pierwsze 2 cyfry) się różni, pomiń tego kandydata
+        if(expectedPostal && gotPostal){
+          const expectedRegion = expectedPostal.substring(0, 2);
+          const gotRegion = gotPostal.substring(0, 2);
+          
+          if(expectedRegion !== gotRegion){
+            console.log(`⏭️ Nominatim: Pomijam kandydata z innym regionem (${expectedRegion} ≠ ${gotRegion}): ${gotPostal} dla "${formatNominatimAddress(cand)}"`);
+            continue; // Pomiń, to zupełnie inne miejsce
+          }
+        }
+        
         if(expectedPostal && gotPostal && gotPostal !== expectedPostal) continue;
         return { lat: parseFloat(cand.lat), lng: parseFloat(cand.lon), formatted: formatNominatimAddress(cand), postal: gotPostal };
       }
-      return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), formatted: formatNominatimAddress(data[0]), postal: extractPostalCode(data[0].display_name) };
+      // Żaden kandydat nie ma dokładnie pasującego kodu — zaakceptuj najlepszy,
+      // ale TYLKO jeśli REGION się zgadza
+      const first = data[0];
+      const firstPostal = extractPostalCode(first.display_name);
+      
+      // Sprawdź region przed akceptacją
+      if(expectedPostal && firstPostal){
+        const expectedRegion = expectedPostal.substring(0, 2);
+        const gotRegion = firstPostal.substring(0, 2);
+        
+        if(expectedRegion !== gotRegion){
+          console.log(`❌ Nominatim: ODRZUCAM najlepszego kandydata - inny region (${expectedRegion} ≠ ${gotRegion}): ${firstPostal}`);
+          return null; // Nie akceptuj wyniku z innego regionu Polski
+        }
+      }
+      
+      const postalMismatch = !!(expectedPostal && firstPostal && firstPostal !== expectedPostal);
+      return { 
+        lat: parseFloat(first.lat), lng: parseFloat(first.lon), formatted: formatNominatimAddress(first), postal: firstPostal,
+        postalMismatch, expectedPostal: postalMismatch ? expectedPostal : null, gotPostal: postalMismatch ? firstPostal : null
+      };
     }
   }catch(e){
     console.error('geocodeNominatim error:', e);
@@ -2851,6 +3097,31 @@ function looksLikeCompanyName(name){
 }
 function cleanRecipientName(name){
   return (name || '').replace(/^(KLIENT|Odbiorca|Odbierca)\s*[:\)]?\s*/i, '').replace(/^🏢\s*/,'').trim();
+}
+/* Wykrywa czy adres zawiera nazwę ulicy (nie tylko kod pocztowy + miasto) */
+function hasStreetInAddress(address){
+  if(!address) return false;
+  
+  // Usuń "Polska" na końcu
+  let addr = address.replace(/,?\s*Polska\s*$/i, '').trim();
+  
+  // Usuń kod pocztowy
+  addr = addr.replace(/\b\d{2}\s*[- ]?\s*\d{3}\b/g, '');
+  
+  // Lista typowych słów-kluczy ulic
+  const streetKeywords = /\b(ul\.|ulica|ulicy|aleja|aleji|aleje|plac|placu|rondo|osiedle|skwer|park|droga|drogi|dróg)\b/i;
+  // Jeśli zawiera typowe słowo ulicy, to ma ulicę
+  if(streetKeywords.test(addr)) return true;
+  
+  // Usuń nazwy miast
+  addr = addr.replace(/\b(Kartuzy|Gdańsk|Gdynia|Żukowo|Pruszcz|Wejherowo|Reda|Rumia|Sopot|Pępowo|Glincz|Leszno|Sierakowice|Mściszewice|Skrzeszewo)\b/gi, '').trim();
+  
+  // Usuń przecinki i spacje
+  const clean = addr.replace(/[,\s]+/g, '');
+  
+  // Jeśli po usunięciu miast i kodu zostało coś (nazwa ulicy + numer), to ma ulicę
+  // Jeśli zostało tylko puste lub bardzo krótkie (1-2 znaki), to NIE ma ulicy
+  return clean.length > 2;
 }
 const POLISH_FIRST_NAMES = new Set([
   'jan','janusz','janina','jerzy','jozef','jozefa','józef','józefa','andrzej','andrzeja','piotr','piotra','pawel','paweł','pawla','pawła',
@@ -3277,78 +3548,56 @@ function isTextDuplicate(name, address){
 
 /* Dialog poprawiania */
 let fixDialogIdx = -1;
+let fixDialogQueue = [];
 function showFixDialog(idx, candidate){
   fixDialogIdx = idx;
   const c = candidate;
   
-  // Wyciągnij dane z adresu OCR
-  const postal = extractPostalCode(c.query) || '';
+  // Wyciągnij ulicę i miasto z adresu OCR, ale BEZ kodu pocztowego — dokumenty
+  // kurierskie często mają nieaktualny kod, a to tylko myli i użytkownika, i geokoder.
   const street = extractStreetWithNumber(c.query) || '';
   const city = extractCity(c.query) || '';
-  
-  // KLUCZOWE: Wstaw "KOD-POCZTOWY ULICA" do pola ulicy
-  // Google Places autocomplete poprawi błędy OCR jeśli zacznie od kodu!
-  const streetWithPostal = postal && street ? `${postal} ${street}` : street;
+  const oneLineAddress = [street, city].filter(Boolean).join(', ');
   
   document.getElementById('fixName').value = c.name || '';
-  document.getElementById('fixStreet').value = streetWithPostal;
-  document.getElementById('fixPostal').value = postal;
-  document.getElementById('fixCity').value = city;
-  document.getElementById('fixGooglePlace').value = '';
+  document.getElementById('fixAddress').value = oneLineAddress;
   document.getElementById('fixDialogDesc').innerHTML = `OCR: <code style="background:#f0f0f0;padding:1px 4px;border-radius:3px;">${escapeHtml(c.query)}</code>`;
   document.getElementById('fixDialog').classList.add('show');
   
-  // Focus na pole ulicy żeby od razu pokazało podpowiedzi
-  setTimeout(() => document.getElementById('fixStreet').focus(), 100);
+  // Focus na pole adresu żeby od razu pokazało podpowiedzi Google
+  setTimeout(() => document.getElementById('fixAddress').focus(), 100);
 }
 async function acceptFixDialog(){
   const name = document.getElementById('fixName').value.trim() || 'Odbiorca';
-  let street = document.getElementById('fixStreet').value.trim();
-  let postal = document.getElementById('fixPostal').value.trim();
-  const city = document.getElementById('fixCity').value.trim();
-  const googlePlaceName = document.getElementById('fixGooglePlace').value.trim();
+  const address = document.getElementById('fixAddress').value.trim();
   
-  // Jeśli street zaczyna się od kodu pocztowego (np. "82-300 Kryształowa 14"), wyciągnij go
-  const streetPostalMatch = street.match(/^(\d{2}[-\s]?\d{3})\s+(.+)$/);
-  if(streetPostalMatch){
-    const extractedPostal = streetPostalMatch[1].replace(/\s+/g, '').replace(/^(\d{2})(\d{3})$/, '$1-$2');
-    const extractedStreet = streetPostalMatch[2];
-    // Jeśli pole postal jest puste, użyj wyciągniętego kodu
-    if(!postal) postal = extractedPostal;
-    street = extractedStreet;
-    console.log(`🔧 Wyciągnięto kod z ulicy: "${extractedPostal}" i ulicę: "${extractedStreet}"`);
-  }
-  
-  if(postal){
-    postal = postal.replace(/\s+/g,'');
-    const m = postal.match(/^(\d{2})[- ]?(\d{3})$/);
-    if(m) postal = `${m[1]}-${m[2]}`;
-  }
-  
-  const parts = [name, street, postal, city].filter(Boolean);
-  const newQuery = parts.join(', ');
+  const newQuery = [name, address].filter(Boolean).join(', ');
   console.log(`📍 Geokodowanie z dialogu: "${newQuery}"`);
   
   document.getElementById('fixDialog').classList.remove('show');
   showProgress(true, 'Geokodowanie...', newQuery);
   const loc = await geocodeAddress(newQuery);
   showProgress(false);
+  
+  console.log(`🔍 Wynik geocodowania:`, loc);
+  
   if(loc){
-    if(!isDuplicate(loc.lat, loc.lng) && !isTextDuplicate(name, loc.formatted)){
-      // Jeśli user podał nazwę firmy, użyj jej bezpośrednio (pomiń auto-detekcję)
-      let placeInfo;
-      if(googlePlaceName){
-        placeInfo = { isCompany: true, googlePlaceName: googlePlaceName, googlePlaceId: null };
-      } else {
-        placeInfo = await resolveGooglePlace(name, loc.formatted, loc.lat, loc.lng);
-      }
+    const dupDistance = isDuplicate(loc.lat, loc.lng);
+    const dupText = isTextDuplicate(name, loc.formatted);
+    console.log(`🔍 Sprawdzanie duplikatów: isDuplicate=${dupDistance}, isTextDuplicate=${dupText}`);
+    
+    if(!dupDistance && !dupText){
+      const placeInfo = await resolveGooglePlace(name, loc.formatted, loc.lat, loc.lng);
+      
+      const candidateData = candidatesWithIssues.get(fixDialogIdx);
+      console.log(`✅ Dodaję punkt: ${name} → ${loc.formatted}`);
       
       stops.push({ 
         id: ++stopCounter, 
         type: 'waypoint', 
         name, 
         address: loc.formatted, 
-        phone: candidatesWithIssues.get(fixDialogIdx)?.phone || '', 
+        phone: candidateData?.phone || '', 
         lat: loc.lat, 
         lng: loc.lng, 
         isEditing: false, 
@@ -3357,24 +3606,67 @@ async function acceptFixDialog(){
         googlePlaceName: placeInfo.googlePlaceName, 
         googlePlaceId: placeInfo.googlePlaceId, 
         routeIndex: null,
+        pm: candidateData?.pm || null,
+        dims: candidateData?.dims || null,
+        weightKg: candidateData?.weightKg || null,
+        cargoQty: candidateData?.cargoQty || null,
+        items: candidateData?.items || null,
+        packageCount: candidateData?.packageCount || 1,
         softQuality: false,
         manuallyVerified: true  // Poprawiony ręcznie = zweryfikowany
       });
       
-      // Usuń wiersz z listy skanowania (poprawiony = znika)
+      // NOWE: Dodaj poprawiony adres z powrotem do listy skanowania (pomarańczowy = zweryfikowany)
       const oldRow = document.querySelector(`.candidate-item[data-candidate-idx="${fixDialogIdx}"]`);
-      if(oldRow) oldRow.remove();
+      if(oldRow){
+        const phoneSuffix = candidateData?.phone ? ` · 📞 ${candidateData.phone}` : '';
+        const companyBadge = placeInfo.isCompany ? ' 🏢' : '';
+        const pmBadge = candidateData?.pm ? ` <span style="background:#fff3e0;color:#b5651d;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;">🟧 PM ${candidateData.pm}</span>` : '';
+        const dimsBadge = (candidateData?.items && candidateData.items.length > 0) ? generateDimsBadges(candidateData.items) : (candidateData?.dims ? ` <span style="background:#eef7ee;color:#2e7d32;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;">📐 ${candidateData.dims.l}×${candidateData.dims.w}×${candidateData.dims.h}</span>` : '');
+        
+        oldRow.className = 'candidate-item warn'; // Pomarańczowy = poprawiony ręcznie
+        oldRow.removeAttribute('data-candidate-idx');
+        oldRow.setAttribute('data-stop-id', stopCounter);
+        oldRow.innerHTML = `<div style="flex:1;"><div class="candidate-name">🟡 ${escapeHtml(name)}${companyBadge}${pmBadge}${dimsBadge}${phoneSuffix} <small style="color:#856404;">(poprawiono)</small></div><div class="candidate-addr">${escapeHtml(loc.formatted)}</div></div>
+          <div class="candidate-actions">
+            <button class="btn btn-sm btn-warning" onclick="showEditDialog(${stopCounter})">✏️ Edytuj</button>
+            <button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="removeScanResultStop(${stopCounter})">🗑️ Usuń</button>
+          </div>`;
+      }
       
       renderStops(); updateMap(); calculateRoute();
       showToast(`✅ Poprawiono: ${name}`);
     } else { 
-      // Duplikat - usuń wiersz z listy skanowania
-      const oldRow = document.querySelector(`.candidate-item[data-candidate-idx="${fixDialogIdx}"]`);
-      if(oldRow) oldRow.remove();
-      showToast('Duplikat - usunięto z listy', 'error'); 
+      console.warn(`⚠️ Duplikat wykryty: ${name} (distance=${dupDistance}, text=${dupText})`);
+      
+      // Zamiast usuwać - pokaż szczegółowy komunikat
+      let reason = '';
+      if(dupDistance && dupText) reason = 'Ten sam adres i nazwa już istnieją w trasie';
+      else if(dupDistance) reason = 'Punkt w tej lokalizacji już istnieje w trasie (< 50m)';
+      else if(dupText) reason = 'Punkt o podobnej nazwie i adresie już istnieje';
+      
+      alert(`❌ Nie dodano: ${name}\n\nPowód: ${reason}\n\nSprawdź czy ten punkt już nie jest na liście tras.`);
+      
+      // NIE usuwaj wiersza - zostaw go widocznym z przyciskiem "Usuń"
+      showToast('Duplikat - sprawdź trasę', 'error'); 
     }
-  } else { showToast('Nie znaleziono', 'error'); }
+  } else { 
+    console.error(`❌ Nie znaleziono adresu: ${newQuery}`);
+    showToast('Nie znaleziono', 'error'); 
+  }
   fixDialogIdx = -1;
+  openNextFixDialogFromQueue();
+}
+// Kolejka: gdy skan wykryje kilka problematycznych adresów naraz, okno "Popraw"
+// otwiera się automatycznie dla każdego po kolei (po zakończeniu skanowania),
+// zamiast czekać na ręczne kliknięcie.
+function queueFixDialog(idx, candidate){
+  fixDialogQueue.push({ idx, candidate });
+}
+function openNextFixDialogFromQueue(){
+  if(fixDialogQueue.length === 0) return;
+  const next = fixDialogQueue.shift();
+  showFixDialog(next.idx, next.candidate);
 }
 
 /* Usuń kandydata z listy skanowanych */
@@ -3383,6 +3675,61 @@ function removeCandidateRow(btn){
   if(row && confirm('Usunąć ten punkt z wyników skanowania?')){
     row.remove();
   }
+}
+
+/* Usuń punkt z listy skanowania i z trasy */
+function removeScanResultStop(stopId){
+  if(confirm('Usunąć ten punkt z listy i trasy?')){
+    // Usuń z tablicy stops
+    stops = stops.filter(s => s.id !== stopId);
+    
+    // Usuń wiersz z listy skanowania
+    const row = document.querySelector(`.candidate-item[data-stop-id="${stopId}"]`);
+    if(row) row.remove();
+    
+    // Odśwież trasę i mapę
+    renderStops();
+    updateMap();
+    calculateRoute();
+    
+    showToast('Usunięto punkt', 'success');
+  }
+}
+
+/* Helper: Grupuje przesyłki o identycznych wymiarach */
+function groupItemsByDimensions(items){
+  if(!items || items.length === 0) return [];
+  
+  const groups = new Map();
+  for(const item of items){
+    const key = `${item.l}×${item.w}×${item.h}`;
+    if(!groups.has(key)){
+      groups.set(key, { dims: {l: item.l, w: item.w, h: item.h}, count: 0 });
+    }
+    groups.get(key).count++;
+  }
+  
+  return Array.from(groups.values());
+}
+
+/* Helper: Generuje badge wymiarów dla wielu przesyłek */
+function generateDimsBadges(items){
+  if(!items || items.length === 0) return '';
+  
+  const groups = groupItemsByDimensions(items);
+  
+  // Jeśli wszystkie mają te same wymiary - pokaż raz z licznikiem
+  if(groups.length === 1){
+    const g = groups[0];
+    const counter = g.count > 1 ? `📦×${g.count} ` : '';
+    return ` <span style="background:#eef7ee;color:#2e7d32;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;">${counter}📐 ${g.dims.l}×${g.dims.w}×${g.dims.h}</span>`;
+  }
+  
+  // Różne wymiary - pokaż wszystkie
+  return groups.map(g => {
+    const counter = g.count > 1 ? `${g.count}× ` : '';
+    return ` <span style="background:#eef7ee;color:#2e7d32;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;">${counter}📐 ${g.dims.l}×${g.dims.w}×${g.dims.h}</span>`;
+  }).join('');
 }
 
 /* Główny przebieg */
@@ -3438,6 +3785,7 @@ async function extractAndGeocode(text){
     const phoneSuffix = c.phone ? ` · 📞 ${escapeHtml(c.phone)}` : '';
     if(!loc){
       candidatesWithIssues.set(idx, c);
+      queueFixDialog(idx, c);
       row.className = 'candidate-item fail';
       row.setAttribute('data-candidate-idx', idx);
       row.innerHTML = `<div style="flex:1;"><div class="candidate-name">❌ ${escapeHtml(c.name)}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(c.query)}</div></div>
@@ -3460,7 +3808,7 @@ async function extractAndGeocode(text){
     
     const postal = loc.formatted.match(/\b(\d{2})-?\d{3}\b/);
     const isLocalRegion = postal && dominantRegion && postal[1] === dominantRegion;
-    const isSoftQuality = loc.source === 'roadsWithoutNumber' || loc.priority < 0;
+    const isSoftQuality = loc.source === 'roadsWithoutNumber' || loc.priority < 0 || loc.postalMismatch;
     const isRegionFallback = loc.source === 'regionFallback';
     
     if(isSoftQuality){ soft++; console.log(`⚠️ Niska jakość: ${loc.formatted}`); }
@@ -3482,16 +3830,29 @@ async function extractAndGeocode(text){
       googlePlaceId: placeInfo.googlePlaceId, 
       routeIndex: null,
       softQuality: isSoftQuality || isRegionFallback,
-      manuallyVerified: false
+      manuallyVerified: false,
+      packageCount: c.packageCount || 1
     });
     
     const companyBadge = placeInfo.isCompany ? ' 🏢' : '';
     const suspiciousBadge = !isLocalRegion && dominantRegion ? ' ⚠️' : '';
     const softBadge = (isSoftQuality || isRegionFallback) ? ' 🟡' : '';
     
+    // Rozróżnij paczki (ta sama podstawa numeru) vs przesyłki (różne numery)
+    let packageBadge = '';
+    if(c.packageCount && c.packageCount > 1){
+      if(c.isMultiPackage){
+        packageBadge = ` <span style="background:#eef3ff;color:var(--blue);border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;">📦×${c.packageCount} paczki</span>`;
+      } else if(c.isMultiShipment){
+        packageBadge = ` <span style="background:#fff4e6;color:#e67e00;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;">🚚×${c.packageCount} przesyłki</span>`;
+      } else {
+        packageBadge = ` <span style="background:#eef3ff;color:var(--blue);border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;">📦×${c.packageCount}</span>`;
+      }
+    }
+    
     row.className = 'candidate-item ok';
     row.innerHTML = `<div style="flex:1;">
-      <div class="candidate-name">✅ ${escapeHtml(c.name)}${companyBadge}${suspiciousBadge}${softBadge}${phoneSuffix}</div>
+      <div class="candidate-name">✅ ${escapeHtml(c.name)}${companyBadge}${suspiciousBadge}${softBadge}${packageBadge}${phoneSuffix}</div>
       <div class="candidate-addr">${escapeHtml(loc.formatted)}</div>
     </div>
     <div class="candidate-actions">
@@ -3530,6 +3891,9 @@ async function extractAndGeocode(text){
   if(duplicates > 0) msg += ` | Pominięto ${duplicates}`;
   if(failed > 0) msg += ` | Nie znaleziono ${failed}`;
   showToast(msg, added > 0 ? 'success' : 'error');
+  
+  // Skan gotowy — jeśli są problematyczne adresy, od razu otwórz "Popraw" dla pierwszego
+  openNextFixDialogFromQueue();
 }
 
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -4451,22 +4815,85 @@ async function saveEditDialog(){
 }
 
 /* Lista przystanków */
+function showPalletViz(stopId){
+  const stop = stops.find(s => s.id === stopId);
+  if(!stop || !stop.dims) return;
+  const { l, w, h } = stop.dims;
+  
+  document.getElementById('palletVizName').textContent = stop.name || '';
+  
+  // Prosty rzut "pseudo-izometryczny": front (szer.×wys.) + głębokość jako skos.
+  // Skalujemy tak, żeby największy wymiar zmieścił się w ~150px.
+  const maxDim = Math.max(l, w, h, 0.1);
+  const scale = 150 / maxDim;
+  const fw = Math.max(w * scale, 20);
+  const fh = Math.max(h * scale, 20);
+  const fd = Math.max(l * scale * 0.5, 12); // głębokość rysowana skrócona (efekt 3D)
+  const pad = 40;
+  const svgW = fw + fd + pad;
+  const svgH = fh + fd + pad;
+  const ox = pad/2, oy = pad/2 + fd;
+  
+  const svg = `
+    <svg viewBox="0 0 ${svgW} ${svgH}" width="220" height="${Math.round(220 * svgH / svgW)}">
+      <!-- góra -->
+      <polygon points="${ox},${oy} ${ox+fd},${oy-fd} ${ox+fd+fw},${oy-fd} ${ox+fw},${oy}" fill="#c9e4ca" stroke="#2e7d32" stroke-width="1.5"/>
+      <!-- bok prawy -->
+      <polygon points="${ox+fw},${oy} ${ox+fd+fw},${oy-fd} ${ox+fd+fw},${oy-fd+fh} ${ox+fw},${oy+fh}" fill="#a8d5aa" stroke="#2e7d32" stroke-width="1.5"/>
+      <!-- front -->
+      <rect x="${ox}" y="${oy}" width="${fw}" height="${fh}" fill="#eef7ee" stroke="#2e7d32" stroke-width="1.5"/>
+      <text x="${ox+fw/2}" y="${oy+fh+16}" font-size="11" fill="#2e7d32" text-anchor="middle" font-weight="700">${w} m</text>
+      <text x="${ox-6}" y="${oy+fh/2}" font-size="11" fill="#2e7d32" text-anchor="end" font-weight="700">${h} m</text>
+      <text x="${ox+fw+fd/2}" y="${oy-fd/2-4}" font-size="11" fill="#2e7d32" text-anchor="middle" font-weight="700">${l} m</text>
+    </svg>`;
+  document.getElementById('palletVizSvg').innerHTML = svg;
+  
+  const metaParts = [];
+  if(stop.cargoQty) metaParts.push(`📦 ${stop.cargoQty}`);
+  if(stop.weightKg) metaParts.push(`⚖️ ${stop.weightKg} kg`);
+  if(stop.pm) metaParts.push(`🟧 PM ${stop.pm}`);
+  document.getElementById('palletVizMeta').textContent = metaParts.join('  ·  ') || `${l} × ${w} × ${h} m`;
+  
+  document.getElementById('palletVizDialog').classList.add('show');
+}
+document.getElementById('palletVizClose')?.addEventListener('click', () => {
+  document.getElementById('palletVizDialog').classList.remove('show');
+});
 function buildStopItemHtml(stop, displayIndex, options = {}){
   const { pending = false, draggable = true } = options;
   
   // Badge jakości: jeśli był niepewny ale zweryfikowany ręcznie -> zielony, inaczej zachowaj żółty
   let qualityBadge = '';
-  if(stop.softQuality && !stop.manuallyVerified){
+  if(stop.suspicious){
+    qualityBadge = '⚠️ ';  // PODEJRZANY kod pocztowy (inny region)
+  } else if(stop.softQuality && !stop.manuallyVerified){
     qualityBadge = '🟡 ';  // Niepewny, NIE zweryfikowany
   } else if(stop.softQuality && stop.manuallyVerified){
     qualityBadge = '✅ ';  // Niepewny, ale ZWERYFIKOWANY ręcznie
   }
   
+  const packageBadge = (stop.packageCount && stop.packageCount > 1)
+    ? (stop.isMultiPackage 
+        ? ` <span style="background:#eef3ff;color:var(--blue);border-radius:8px;padding:1px 7px;font-size:10.5px;font-weight:800;">📦×${stop.packageCount} paczki</span>`
+        : stop.isMultiShipment
+          ? ` <span style="background:#fff4e6;color:#e67e00;border-radius:8px;padding:1px 7px;font-size:10.5px;font-weight:800;">🚚×${stop.packageCount} przesyłki</span>`
+          : ` <span style="background:#eef3ff;color:var(--blue);border-radius:8px;padding:1px 7px;font-size:10.5px;font-weight:800;">📦×${stop.packageCount}</span>`
+      )
+    : '';
+  const pmBadge = stop.pm
+    ? ` <span style="background:#fff3e0;color:#b5651d;border-radius:8px;padding:1px 7px;font-size:10.5px;font-weight:800;">🟧 PM ${stop.pm}</span>`
+    : '';
+  const dimsBadge = (stop.items && stop.items.length > 0) 
+    ? generateDimsBadges(stop.items)
+    : (stop.dims 
+      ? ` <span onclick="event.stopPropagation();showPalletViz(${stop.id})" style="background:#eef7ee;color:#2e7d32;border-radius:8px;padding:1px 7px;font-size:10.5px;font-weight:800;cursor:pointer;">📐 ${stop.dims.l}×${stop.dims.w}×${stop.dims.h}</span>`
+      : '');
+  
   return `
     <div class="stop-item${pending ? ' pending' : ''}${stop.visited ? ' visited' : ''}" data-stop-id="${stop.id}">
       <div class="stop-header">
         <div class="stop-number ${stop.type}${pending ? ' pending' : ''}">${displayIndex != null ? displayIndex : '·'}</div>
-        <div class="stop-title">${qualityBadge}${stop.isCompany ? '🏢 ' : ''}${escapeHtml(stop.name)}</div>
+        <div class="stop-title">${qualityBadge}${stop.isCompany ? '🏢 ' : ''}${escapeHtml(stop.name)}${packageBadge}${pmBadge}${dimsBadge}</div>
         <div class="stop-badge">${stop.type==='start'?'START':stop.type==='end'?'KONIEC':pending?'NA MAPIE':'W TRASIE'}</div>
       </div>
       <div class="stop-address" onclick="toggleStopExpand(${stop.id})">${escapeHtml(stop.address)}</div>
