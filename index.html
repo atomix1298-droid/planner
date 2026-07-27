@@ -1079,8 +1079,24 @@ function initCloudSync(){
 }
 function pushToCloud(state){
   if(!cloudDb || !courierId) return;
+  
+  // Debug: Znajdź wszystkie undefined w state.stops
+  if(state.stops){
+    state.stops.forEach((stop, idx) => {
+      Object.keys(stop).forEach(key => {
+        if(stop[key] === undefined){
+          console.error(`🔴 Stop #${idx} (${stop.name}) ma undefined w polu: ${key}`);
+          stop[key] = null; // Napraw natychmiast
+        }
+      });
+    });
+  }
+  
   cloudDb.collection(CLOUD_COLLECTION).doc(courierId).set(state)
-    .catch(() => setCloudStatus('⚠️ Nie udało się zapisać w chmurze'));
+    .catch((err) => {
+      console.error('Firebase error:', err);
+      setCloudStatus('⚠️ Nie udało się zapisać w chmurze');
+    });
 }
 
 /* Udostępnianie gotowej trasy linkiem — zapis snapshotu w osobnej kolekcji Firestore */
@@ -1708,6 +1724,40 @@ async function extractAndGeocodeVision(text){
       failed++;
       continue;
     }
+    
+    // Sprawdź czy ulica z OCR różni się znacznie od Google (może OCR źle przeczytał)
+    const ocrStreet = extractStreetNameAndNumber(c.query);
+    const googleStreet = extractStreetNameAndNumber(loc.formatted);
+    
+    if(ocrStreet && googleStreet){
+      // Normalizuj do porównania (małe litery, bez znaków specjalnych)
+      const norm1 = ocrStreet.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const norm2 = googleStreet.toLowerCase().replace(/[^a-z0-9]/g, '');
+      
+      // Jeśli różnica jest większa niż 30% długości, prawdopodobnie OCR błąd
+      const maxLen = Math.max(norm1.length, norm2.length);
+      let diffCount = 0;
+      for(let i = 0; i < maxLen; i++){
+        if(norm1[i] !== norm2[i]) diffCount++;
+      }
+      const diffPercent = diffCount / maxLen;
+      
+      if(diffPercent > 0.3){
+        console.warn(`⚠️ Ulica OCR różni się od Google: "${ocrStreet}" vs "${googleStreet}" (${Math.round(diffPercent*100)}% różnicy)`);
+        candidatesWithIssues.set(idx, c);
+        queueFixDialog(idx, c);
+        row.className = 'candidate-item fail';
+        row.setAttribute('data-candidate-idx', idx);
+        row.innerHTML = `<div style="flex:1;"><div class="candidate-name">🟡 ${escapeHtml(c.name)}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(c.query)} → <span style="color:#f39c12;">sprawdź ulicę: ${escapeHtml(ocrStreet)} vs ${escapeHtml(googleStreet)}</span></div></div>
+          <div class="candidate-actions">
+            <button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button>
+            <button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="removeCandidateRow(this)">🗑️ Usuń</button>
+          </div>`;
+        failedRows.push(row);
+        failed++;
+        continue;
+      }
+    }
     if(isDuplicate(loc.lat, loc.lng) || isTextDuplicate(c.name, loc.formatted)){
       row.className = 'candidate-item fail';
       row.innerHTML = `<div><div class="candidate-name">⚠️ duplikat</div><div class="candidate-addr">${escapeHtml(loc.formatted)}</div></div>`;
@@ -1742,13 +1792,47 @@ async function extractAndGeocodeVision(text){
     }
     
     const placeInfo = await resolveGooglePlace(c.name, loc.formatted, loc.lat, loc.lng);
-    stops.push({ id: ++stopCounter, type: 'waypoint', name: c.name || 'Odbiorca', address: loc.formatted, phone: c.phone || '', lat: loc.lat, lng: loc.lng, isEditing: false, visited: false, isCompany: placeInfo.isCompany, googlePlaceName: placeInfo.googlePlaceName, googlePlaceId: placeInfo.googlePlaceId, routeIndex: null, pm: c.pm || null, dims: c.dims || null, items: c.items || null, weightKg: c.weightKg || null, cargoQty: c.cargoQty || null, packageCount: c.packageCount || 1 });
+    
+    // Zdefiniuj zmienne jakości geokodowania (jak w głównej funkcji)
+    const isSoftQuality = loc.source === 'roadsWithoutNumber' || loc.priority < 0 || loc.postalMismatch || loc.soft;
+    const isRegionFallback = loc.source === 'regionFallback';
+    
+    stops.push({ 
+      id: ++stopCounter, 
+      type: 'waypoint', 
+      name: c.name || 'Odbiorca', 
+      address: loc.formatted, 
+      phone: c.phone || '', 
+      lat: loc.lat, 
+      lng: loc.lng, 
+      isEditing: false, 
+      visited: false, 
+      isCompany: placeInfo.isCompany, 
+      googlePlaceName: placeInfo.googlePlaceName || null, 
+      googlePlaceId: placeInfo.googlePlaceId || null, 
+      routeIndex: null, 
+      pm: c.pm || null, 
+      dims: c.dims || null, 
+      items: c.items || null, 
+      weightKg: c.weightKg || null, 
+      cargoQty: c.cargoQty || null, 
+      mass: c.mass || null,
+      packageCount: c.packageCount || 1, 
+      isMultiPackage: c.isMultiPackage || false, 
+      isMultiShipment: c.isMultiShipment || false,
+      softQuality: isSoftQuality || isRegionFallback,
+      manuallyVerified: false
+    });
     const companyBadge = placeInfo.isCompany ? ' 🏢' : '';
-    const pmBadge = c.pm ? ` <span style="background:#fff3e0;color:#b5651d;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;">🟧 PM ${c.pm}</span>` : '';
-    const dimsBadge = (c.items && c.items.length > 0) ? generateDimsBadges(c.items) : (c.dims ? ` <span style="background:#eef7ee;color:#2e7d32;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;">📐 ${c.dims.l}×${c.dims.w}×${c.dims.h}</span>` : '');
+    // Usunięto pmBadge - nie jest potrzebny w zakładce Skan
+    const dimsBadge = (c.items && c.items.length > 0) 
+      ? generateDimsBadges(c.items, stopCounter)
+      : (c.dims 
+        ? ` <span onclick="event.stopPropagation();showPalletViz(${stopCounter})" style="background:#eef7ee;color:#2e7d32;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;cursor:pointer;">📐 ${c.dims.l}×${c.dims.w}×${c.dims.h || '?'}</span>` 
+        : '');
     row.className = 'candidate-item ok';
     row.setAttribute('data-stop-id', stopCounter);
-    row.innerHTML = `<div style="flex:1;"><div class="candidate-name">✅ ${escapeHtml(c.name)}${companyBadge}${pmBadge}${dimsBadge}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(loc.formatted)}</div></div>
+    row.innerHTML = `<div style="flex:1;"><div class="candidate-name">✅ ${escapeHtml(c.name)}${companyBadge}${dimsBadge}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(loc.formatted)}</div></div>
       <div class="candidate-actions">
         <button class="btn btn-sm btn-warning" onclick="showEditDialog(${stopCounter})">✏️ Edytuj</button>
         <button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="removeScanResultStop(${stopCounter})">🗑️ Usuń</button>
@@ -1858,6 +1942,10 @@ function cleanAddress(addr){
   s = s.replace(/\s*,\s*Polska\s*$/i, '');
   s = s.replace(/\s*Polska\s*$/i, '');
   s = s.replace(/\s*,\s*$/,'');
+  
+  // Usuń kropki po kodach pocztowych (np. "84110." → "84110")
+  s = s.replace(/(\d{2}\s*-?\s*\d{3})\./g, '$1');
+  
   s = s.replace(/\s{2,}/g, ' ');
   return s.trim();
 }
@@ -1867,6 +1955,23 @@ function extractPostalCode(addr){
   const m = addr.match(/(\d{2})\s*[- ]?\s*(\d{3})(?:\b|,|$)/);
   if(m) return `${m[1]}-${m[2]}`;
   return null;
+}
+
+// Wyciąga nazwę ulicy + numer z adresu (do porównań OCR vs Google)
+function extractStreetNameAndNumber(addr){
+  if(!addr) return null;
+  
+  // Usuń nazwę miasta i kod pocztowy
+  let clean = addr.replace(/,?\s*Polska\s*$/i, '').trim();
+  clean = clean.replace(/\b\d{2}\s*[- ]?\s*\d{3}\b/g, '').trim();
+  clean = clean.replace(/\b(Kartuzy|Gdańsk|Gdynia|Żukowo|Pruszcz|Wejherowo|Reda|Rumia|Sopot|Pępowo|Glincz|Leszno|Sierakowice|Mściszewice|Skrzeszewo|Krokowa|Mrzezino|Kartoszyno)\b/gi, '').trim();
+  
+  // Usuń nazwę odbiorcy (pierwszy fragment przed przecinkiem)
+  const parts = clean.split(',').map(p => p.trim());
+  if(parts.length > 1) clean = parts.slice(1).join(', ').trim();
+  
+  // Zostaje ulica + numer (np. "Kolejowa 21")
+  return clean.replace(/^(ul\.|ulica)\s+/i, '').trim();
 }
 function extractPostalPrefix(addr){
   if(!addr) return null;
@@ -2111,25 +2216,158 @@ const PALLET_CODES = {
     const addr = cleanAddress(lines[odbiorcaIdx]);
     const name = extractNameFromAddress_Vision(addr);
     const phone = findPhoneNear_Vision(odbiorcaIdx, lines);
-    // PM: miejsce paletowe (np. "PM: 0.5", "PM: 1", "PM: 1.5") — z dokumentów załadunkowych typu GEIS.
+    
+    // Parsowanie wymiarów i kodów nośników GEIS
     let pm = null;
     let dims = null;
     let cargoQty = null;
-    for(let j = win.from; j < win.to; j++){
-      const pmMatch = lines[j].match(/\bPM\s*:?\s*([\d]+[.,]?[\d]*)/i);
-      if(pmMatch && !pm) pm = pmMatch[1].replace(',', '.');
-      // Wiersz tabeli "Ilość JŁ": np. "1  HP" — ilość + kod nośnika, samo w linii.
-      const codeMatch = lines[j].match(/^(\d+)\s+([A-Z]{2,4})$/);
-      if(codeMatch && !dims){
-        const code = codeMatch[2];
-        if(PALLET_CODES[code]){
+    let mass = null;
+    let volume = null; // Objętość ze skanu - użyjemy jej do wyliczenia wysokości zamiast tabelki kodów
+    
+    // Rozszerzamy zakres szukania wymiarów o kilka linii dalej (OCR czasem dzieli bloki inaczej)
+    const searchEnd = Math.min(win.to + 15, lines.length);
+    
+    console.log(`🔍 Szukam wymiarów dla "${name}" w okienku (linie ${win.from}-${win.to}, rozszerzony zakres: ${searchEnd}):`);
+    
+    for(let j = win.from; j < searchEnd; j++){
+      const l = lines[j];
+      console.log(`  ${j}: "${l}"`);
+      
+      // PM: miejsce paletowe (np. "PM: 0.5", "PM: 1", "PM: 1.5")
+      const pmMatch = l.match(/\bPM\s*:?\s*([\d]+[.,]?[\d]*)/i);
+      if(pmMatch && !pm){
+        pm = pmMatch[1].replace(',', '.');
+        console.log(`    ✅ PM: ${pm}`);
+      }
+      
+      // Kod nośnika GEIS (np. "Nośn: EP", "Nosn: DD")
+      const carrierMatch = l.match(/No[sś]n[:\s]*([A-Z]{2,3})\b/i);
+      if(carrierMatch){
+        const code = carrierMatch[1].toUpperCase();
+        console.log(`    🔍 Wykryto kod nośnika: ${code}`);
+        if(PALLET_CODES[code] && !dims){
           const pc = PALLET_CODES[code];
-          if(pc.l && pc.w) dims = { l: pc.l, w: pc.w, h: null, code, label: pc.label };
-          cargoQty = `${codeMatch[1]} ${code}`;
+          if(pc.l && pc.w){
+            dims = { l: pc.l, w: pc.w, h: null };
+            pm = pc.mpl;
+            console.log(`    ✅ Rozpoznano nośnik GEIS: ${code} → ${dims.l}×${dims.w}m, PM=${pm}`);
+          }
+        } else if(!PALLET_CODES[code]){
+          console.warn(`    ⚠️ Nieznany kod nośnika: ${code}`);
         }
       }
+      
+      // Wiersz tabeli "Ilość JŁ": np. "1  HP" — ilość + kod nośnika w JEDNEJ linii
+      const codeMatch = l.match(/^(\d+)\s+([A-Z]{2,4})$/);
+      if(codeMatch && !dims){
+        const code = codeMatch[2];
+        console.log(`    🔍 Wykryto kod jednostki (1 linia): ${code}`);
+        if(PALLET_CODES[code]){
+          const pc = PALLET_CODES[code];
+          if(pc.l && pc.w){
+            dims = { l: pc.l, w: pc.w, h: null };
+            pm = pc.mpl;
+            cargoQty = `${codeMatch[1]} ${code}`;
+            console.log(`    ✅ Rozpoznano kod jednostki: ${code} → ${dims.l}×${dims.w}m`);
+          }
+        }
+      }
+      
+      // NOWY: "Ilość JŁ" → "1" → "HP" na OSOBNYCH liniach
+      // OCR może źle rozpoznać "Ilość" jako "llosc", "llość", "Ilosc" etc.
+      const iloscRegex = /[Il1l]lo[sś][ćc]\s*J[LŁl1]/i;
+      if(iloscRegex.test(l) && !dims && j + 2 < searchEnd){
+        console.log(`    🔍 Znaleziono "Ilość JŁ" - sprawdzam kolejne 2 linie...`);
+        const nextLine = lines[j + 1].trim();
+        const codeLine = lines[j + 2].trim();
+        console.log(`      Linia ${j+1}: "${nextLine}"`);
+        console.log(`      Linia ${j+2}: "${codeLine}"`);
+        const qtyMatch = nextLine.match(/^(\d+)$/);
+        const codeOnlyMatch = codeLine.match(/^([A-Z]{2,4})$/);
+        
+        if(qtyMatch && codeOnlyMatch){
+          const code = codeOnlyMatch[1];
+          console.log(`    🔍 Wykryto kod jednostki (3 linie): ${code}`);
+          if(PALLET_CODES[code]){
+            const pc = PALLET_CODES[code];
+            if(pc.l && pc.w){
+              dims = { l: pc.l, w: pc.w, h: null };
+              pm = pc.mpl;
+              cargoQty = `${qtyMatch[1]} ${code}`;
+              console.log(`    ✅ Rozpoznano kod jednostki: ${code} → ${dims.l}×${dims.w}m, PM=${pm}`);
+            }
+          }
+        }
+      }
+      
+      // DODATKOWY FORMAT: "Ilość JL 1 HP" w JEDNEJ linii (z odstępami)
+      const inlineMatch = l.match(/[Il1l]lo[sś][ćc]\s*J[LŁl1]\s*(\d+)\s+([A-Z]{2,4})\b/i);
+      if(inlineMatch && !dims){
+        const code = inlineMatch[2];
+        console.log(`    🔍 Wykryto kod jednostki (inline): ${code}`);
+        if(PALLET_CODES[code]){
+          const pc = PALLET_CODES[code];
+          if(pc.l && pc.w){
+            dims = { l: pc.l, w: pc.w, h: null };
+            pm = pc.mpl;
+            cargoQty = `${inlineMatch[1]} ${code}`;
+            console.log(`    ✅ Rozpoznano kod jednostki: ${code} → ${dims.l}×${dims.w}m, PM=${pm}`);
+          }
+        }
+      }
+      
+      // DODATKOWY FORMAT: sam kod w linii po "Ilość: X" (bez "JŁ")
+      // np. "Ilość: 1" → następna linia "HP"
+      if(/[Il1l]lo[sś][ćc]\s*[:]\s*\d+/i.test(l) && !dims && j + 1 < searchEnd){
+        const nextCodeLine = lines[j + 1].trim();
+        const soloCode = nextCodeLine.match(/^([A-Z]{2,4})$/);
+        if(soloCode){
+          const code = soloCode[1];
+          console.log(`    🔍 Wykryto kod po "Ilość:": ${code}`);
+          if(PALLET_CODES[code]){
+            const pc = PALLET_CODES[code];
+            if(pc.l && pc.w){
+              dims = { l: pc.l, w: pc.w, h: null };
+              pm = pc.mpl;
+              const qtyFromLine = l.match(/(\d+)/);
+              cargoQty = qtyFromLine ? `${qtyFromLine[1]} ${code}` : `1 ${code}`;
+              console.log(`    ✅ Rozpoznano kod jednostki: ${code} → ${dims.l}×${dims.w}m, PM=${pm}`);
+            }
+          }
+        }
+      }
+      
+      // Masa (waga w kg) - różne formaty
+      const massMatch = l.match(/Masa[:\s]*([0-9]+(?:[,.][0-9]+)?)/i);
+      if(massMatch && !mass){
+        mass = parseFloat(massMatch[1].replace(',', '.'));
+        console.log(`    ✅ Masa: ${mass} kg`);
+      }
+      
+      // Objętość ze skanu (np. "Objętość 1.8", "Objętość: 1.8")
+      // OCR może różnie przeczytać: "Objętość", "Objetość", "Objetosc", "Objętosc"
+      const volumeMatch = l.match(/Obj[eę][tł][oóe][sś][ćc][\s:]*([0-9]+(?:[.,][0-9]+)?)/i);
+      if(volumeMatch && !volume){
+        volume = parseFloat(volumeMatch[1].replace(',', '.'));
+        console.log(`    📦 Objętość: ${volume} m³`);
+      }
     }
-    candidates.push({ name, query: addr, phone, source: 'DOK_ZAL', pm, dims, cargoQty });
+    
+    // Wysokość liczymy zawsze z rzeczywistej objętości ze skanu (jeśli dostępna),
+    // a NIE z domyślnej wartości z tabelki kodów nośników - tabelka daje tylko l×w.
+    if(dims && dims.l && dims.w && volume){
+      const calculatedHeight = volume / (dims.l * dims.w);
+      dims.h = Math.round(calculatedHeight * 100) / 100;
+      console.log(`    ✅ Wyliczona wysokość z objętości: ${dims.h} m (${volume} / (${dims.l} × ${dims.w}))`);
+    }
+    
+    if(!dims){
+      console.warn(`⚠️ Nie znaleziono wymiarów dla "${name}"`);
+    } else {
+      console.log(`✅ Finalne wymiary dla "${name}": ${dims.l}×${dims.w}${dims.h ? '×' + dims.h : ''}m`);
+    }
+    
+    candidates.push({ name, query: addr, phone, source: 'DOK_ZAL', pm, dims, cargoQty, mass, volume });
   });
 
   // Strategia 2: (KLIENT) — SUS
@@ -2173,10 +2411,12 @@ const PALLET_CODES = {
     for(let k = i + 1; k < lines.length; k++){ if(lines[k].includes('(KLIENT)')){ searchEnd = k; break; } }
     searchEnd = Math.min(searchEnd, i + 30);
     const block = lines.slice(i, searchEnd).join(' ');
+    console.log(`🔍 Szukam wymiarów w bloku dla "${name}":`, block.substring(0, 300) + '...');
     const dimRe = /(\d+[.,]?\d*)\s*[x×]\s*(\d+[.,]?\d*)\s*[x×]\s*(\d+[.,]?\d*)/g;
     const items = [];
     let dm;
     while((dm = dimRe.exec(block)) !== null){
+      console.log(`✅ Znaleziono wymiary: ${dm[1]}×${dm[2]}×${dm[3]}`);
       // Szukaj wagi i typu ładunku w pobliżu tego konkretnego dopasowania wymiarów (do 60 znaków dalej)
       const nearby = block.slice(dm.index, dm.index + 80);
       const wMatch = nearby.match(/(\d+[.,]?\d*)\s*kg\b/i);
@@ -2192,6 +2432,7 @@ const PALLET_CODES = {
     const cargoQty = dims ? dims.qty : null;
     
     console.log(`📦 "${name}" znaleziono ${items.length} wymiarów:`, items);
+    if(items.length === 0) console.warn(`⚠️ Brak wymiarów dla "${name}" w bloku`);
     
     if(query.length > 8) candidates.push({ name, query, phone, source: 'KLIENT', dims, weightKg, cargoQty, items });
   }
@@ -2344,6 +2585,64 @@ function extractCandidatesFromText_Tesseract(text){
       trackingNumber = lines[win.from].trim();
     }
     
+    // Szukaj kodu nośnika (Nośn:) i masy (Masa:) w tym okienku
+    let carrierCode = null;
+    let mass = null;
+    let dims = null;
+    let pm = null;
+    
+    for(let k = win.from; k < win.to; k++){
+      const l = lines[k];
+      
+      // Format 1: "Nośn: EP"
+      const carrierMatch = l.match(/No[sś]n[:\s]*([A-Z]{2,4})\b/i);
+      if(carrierMatch && !carrierCode){
+        carrierCode = carrierMatch[1].toUpperCase();
+        if(geisCarrierSizes[carrierCode]){
+          const size = geisCarrierSizes[carrierCode];
+          dims = { l: size.l, w: size.w, h: size.h };
+          pm = size.pm;
+          console.log(`📦 Rozpoznano nośnik: ${carrierCode} → ${dims.l}×${dims.w}m, PM=${pm}`);
+        }
+      }
+      
+      // Format 2: "Ilość JŁ" → "1" → "EP" (3 linie)
+      if(/[Il1l]lo[sś][ćc]\s*J[LŁl1]/i.test(l) && !dims && k + 2 < win.to){
+        const nextLine = lines[k + 1].trim();
+        const codeLine = lines[k + 2].trim();
+        const qtyMatch = nextLine.match(/^(\d+)$/);
+        const codeMatch = codeLine.match(/^([A-Z]{2,4})$/);
+        if(qtyMatch && codeMatch){
+          carrierCode = codeMatch[1];
+          if(geisCarrierSizes[carrierCode]){
+            const size = geisCarrierSizes[carrierCode];
+            dims = { l: size.l, w: size.w, h: size.h };
+            pm = size.pm;
+            console.log(`📦 Rozpoznano nośnik (3 linie): ${carrierCode} → ${dims.l}×${dims.w}m, PM=${pm}`);
+          }
+        }
+      }
+      
+      // Format 3: "Ilość JŁ 1 EP" (inline)
+      const inlineMatch = l.match(/[Il1l]lo[sś][ćc]\s*J[LŁl1]\s*\d+\s+([A-Z]{2,4})\b/i);
+      if(inlineMatch && !dims){
+        carrierCode = inlineMatch[1];
+        if(geisCarrierSizes[carrierCode]){
+          const size = geisCarrierSizes[carrierCode];
+          dims = { l: size.l, w: size.w, h: size.h };
+          pm = size.pm;
+          console.log(`📦 Rozpoznano nośnik (inline): ${carrierCode} → ${dims.l}×${dims.w}m, PM=${pm}`);
+        }
+      }
+      
+      // Masa
+      const massMatch = l.match(/Masa[:\s]*([0-9]+(?:[,.][0-9]+)?)/i);
+      if(massMatch && !mass){
+        mass = parseFloat(massMatch[1].replace(',', '.'));
+        console.log(`⚖️ Rozpoznano masę: ${mass} kg`);
+      }
+    }
+    
     for(let j = win.from; j < win.to; j++){
       if(isDocumentHeader(lines[j]) || isFieldJunk(lines[j])) continue;
       const passedAddressLine = isAddressLine(lines[j]);
@@ -2360,7 +2659,21 @@ function extractCandidatesFromText_Tesseract(text){
       const name = extractNameFromAddress(addr);
       const phone = findPhoneNear(j, lines);
       console.log(`➕ Dodano kandydata: "${name}" - query: "${addr}" - tracking: ${trackingNumber}`);
-      candidates.push({ name, query: addr, phone, source: 'DOK_ZAL', trackingNumber });
+      
+      const candidate = { 
+        name, 
+        query: addr, 
+        phone, 
+        source: 'DOK_ZAL', 
+        trackingNumber 
+      };
+      
+      // Dodaj wymiary i wagę jeśli znaleziono w tym okienku
+      if(dims) candidate.dims = dims;
+      if(pm) candidate.pm = pm;
+      if(mass) candidate.mass = mass;
+      
+      candidates.push(candidate);
     }
   });
   for(let i = 0; i < lines.length; i++){
@@ -2429,11 +2742,10 @@ function extractCandidatesFromText_Tesseract(text){
       // Przerwij jeśli trafiliśmy na kolejny numer trackingowy
       if(/^\d{9,20}$/.test(l.trim())) break;
       
-      // Szukaj pola "Nośn:" (może być zapisane jako "Nosn:", "Nośn:", "Nośn", etc.)
-      const carrierMatch = l.match(/No[sś]n[:\s]*([A-Z]{2,3})\b/i);
+      // Format 1: "Nośn: EP"
+      const carrierMatch = l.match(/No[sś]n[:\s]*([A-Z]{2,4})\b/i);
       if(carrierMatch && !carrierCode){
         carrierCode = carrierMatch[1].toUpperCase();
-        // Mapuj na wymiary według tabeli GEIS
         if(geisCarrierSizes[carrierCode]){
           const size = geisCarrierSizes[carrierCode];
           dims = { l: size.l, w: size.w, h: size.h };
@@ -2441,11 +2753,54 @@ function extractCandidatesFromText_Tesseract(text){
         }
       }
       
-      // Szukaj pola "Masa:" (waga w kg)
+      // Format 2: "Ilość JŁ" → "1" → "EP" (sprawdź następne 2 linie)
+      if(/[Il1l]lo[sś][ćc]\s*J[LŁl1]/i.test(l) && !dims && i + o + 2 < lines.length){
+        const nextLine = lines[i + o + 1].trim();
+        const codeLine = lines[i + o + 2].trim();
+        const qtyMatch = nextLine.match(/^(\d+)$/);
+        const codeMatch = codeLine.match(/^([A-Z]{2,4})$/);
+        if(qtyMatch && codeMatch){
+          carrierCode = codeMatch[1];
+          if(geisCarrierSizes[carrierCode]){
+            const size = geisCarrierSizes[carrierCode];
+            dims = { l: size.l, w: size.w, h: size.h };
+            pm = size.pm;
+          }
+        }
+      }
+      
+      // Format 3: "Ilość JŁ 1 EP" (inline)
+      const inlineMatch = l.match(/[Il1l]lo[sś][ćc]\s*J[LŁl1]\s*\d+\s+([A-Z]{2,4})\b/i);
+      if(inlineMatch && !dims){
+        carrierCode = inlineMatch[1];
+        if(geisCarrierSizes[carrierCode]){
+          const size = geisCarrierSizes[carrierCode];
+          dims = { l: size.l, w: size.w, h: size.h };
+          pm = size.pm;
+        }
+      }
+      
+      // Masa
       const massMatch = l.match(/Masa[:\s]*([0-9]+(?:[,.][0-9]+)?)/i);
       if(massMatch && !mass){
         mass = parseFloat(massMatch[1].replace(',', '.'));
       }
+      
+      // Objętość (zapisz tymczasowo, obliczenie wysokości na końcu)
+      // OCR może różnie przeczytać: "Objętość", "Objetość", "Objetosc", "Objętosc"
+      // Może być "Objętość 1.8" lub "Objętość: 1.8"
+      const volumeMatch = l.match(/Obj[eę][tł][oóe][sś][ćc][\s:]*([0-9]+(?:[.,][0-9]+)?)/i);
+      if(volumeMatch && !volume){
+        volume = parseFloat(volumeMatch[1].replace(',', '.'));
+        console.log(`    📦 Objętość: ${volume} m³`);
+      }
+    }
+    
+    // Po znalezieniu dims i volume - oblicz wysokość
+    if(dims && dims.l && dims.w && !dims.h && volume){
+      const calculatedHeight = volume / (dims.l * dims.w);
+      dims.h = Math.round(calculatedHeight * 100) / 100; // Zaokrąglij do 2 miejsc po przecinku
+      console.log(`    ✅ Wyliczona wysokość z objętości: ${dims.h} m (${volume} / (${dims.l} × ${dims.w}))`);
     }
     
     let parts = [];
@@ -2586,6 +2941,7 @@ async function geocodeGoogle(rawAddress){
   const expectedPostal = extractPostalCode(address);
   
   console.log(`📍 Geokodowanie: "${rawAddress}" → "${address}" (oczekiwany kod: ${expectedPostal})`);
+  console.log(`🔍 Rozpoczynam zapytanie do Google Geocoding API...`);
   
   // UWAGA: nie filtrujemy już po stronie Google przez components=postal_code —
   // kody pocztowe w dokumentach kurierskich (zwłaszcza dla małych wsi) bywają
@@ -2595,8 +2951,11 @@ async function geocodeGoogle(rawAddress){
   let url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_API_KEY}&language=pl&region=pl`;
   
   try{
+    console.log(`🌐 Wysyłam fetch do Google...`);
     const res = await fetch(url);
+    console.log(`✅ Otrzymano odpowiedź od Google`);
     const data = await res.json();
+    console.log(`✅ Sparsowano JSON od Google`);
     incrementApiUsage('geocoding');
     
     console.log(`📍 Google Geocoding status: ${data.status}`);
@@ -3464,24 +3823,30 @@ function initBottomSheet(){
   sheetApi = { snapTo: (name) => setOpen(name !== 'collapsed'), show: () => setOpen(true), hide: () => setOpen(false) };
 }
 async function resolveGooglePlace(name, address, lat, lng){
-  const cb = document.getElementById('companyDetection');
-  if(cb && !cb.checked) return { isCompany: false, googlePlaceName: null, googlePlaceId: null };
+  // Timeout 10 sekund dla całej funkcji
+  const timeoutPromise = new Promise((resolve) => setTimeout(() => {
+    console.warn(`⏱️ resolveGooglePlace timeout dla "${name}"`);
+    resolve({ isCompany: false, googlePlaceName: null, googlePlaceId: null });
+  }, 10000));
   
-  // Najpierw sprawdź heurystycznie czy to firma czy osoba
-  const isCompany = !looksLikePersonName(name);
-  
-  if(!isCompany){
-    // To osoba prywatna - nie szukaj w Google Places
-    return { isCompany: false, googlePlaceName: null, googlePlaceId: null };
-  }
-  
-  // To firma - spróbuj znaleźć oficjalną nazwę w Google Places przez GEOCODING API
-  // Geocoding zwraca place_id i formatted_address - potem możemy wyciągnąć nazwę z results
-  try {
-    const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_API_KEY}&language=pl&result_type=point_of_interest|establishment`;
+  const workPromise = (async () => {
+    const cb = document.getElementById('companyDetection');
+    if(cb && !cb.checked) return { isCompany: false, googlePlaceName: null, googlePlaceId: null };
     
-    const res = await fetch(geocodeUrl);
-    const data = await res.json();
+    // Najpierw sprawdź heurystycznie czy to firma czy osoba
+    const isCompany = !looksLikePersonName(name);
+    
+    if(!isCompany){
+      // To osoba prywatna - nie szukaj w Google Places
+      return { isCompany: false, googlePlaceName: null, googlePlaceId: null };
+    }
+    
+    // To firma - spróbuj znaleźć oficjalną nazwę w Google Places przez GEOCODING API
+    try {
+      const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_API_KEY}&language=pl&result_type=point_of_interest|establishment`;
+      
+      const res = await fetch(geocodeUrl);
+      const data = await res.json();
     
     if(data.status === 'OK' && data.results && data.results.length > 0){
       // Szukamy POI (Point of Interest) lub Establishment w promieniu 50m
@@ -3523,6 +3888,9 @@ async function resolveGooglePlace(name, address, lat, lng){
   // Nie znaleziono w Google Places - użyj nazwy z OCR
   console.log(`⚠️ Google Places: "${name}" nie znaleziono - użyję nazwy z OCR`);
   return { isCompany: true, googlePlaceName: null, googlePlaceId: null };
+  })(); // Koniec workPromise
+  
+  return Promise.race([workPromise, timeoutPromise]);
 }
 function wordsOf(text){
   const ascii = (text || '').toLowerCase()
@@ -3698,8 +4066,8 @@ async function acceptFixDialog(){
         isEditing: false, 
         visited: false, 
         isCompany: placeInfo.isCompany, 
-        googlePlaceName: placeInfo.googlePlaceName, 
-        googlePlaceId: placeInfo.googlePlaceId, 
+        googlePlaceName: placeInfo.googlePlaceName || null, 
+        googlePlaceId: placeInfo.googlePlaceId || null, 
         routeIndex: null,
         pm: candidateData?.pm || null,
         dims: candidateData?.dims || null,
@@ -3797,9 +4165,10 @@ function groupItemsByDimensions(items){
   
   const groups = new Map();
   for(const item of items){
-    const key = `${item.l}×${item.w}×${item.h}`;
+    // Klucz: jeśli h jest null/undefined, używamy tylko l×w
+    const key = item.h ? `${item.l}×${item.w}×${item.h}` : `${item.l}×${item.w}`;
     if(!groups.has(key)){
-      groups.set(key, { dims: {l: item.l, w: item.w, h: item.h}, count: 0 });
+      groups.set(key, { dims: {l: item.l, w: item.w, h: item.h || null}, count: 0 });
     }
     groups.get(key).count++;
   }
@@ -3808,22 +4177,31 @@ function groupItemsByDimensions(items){
 }
 
 /* Helper: Generuje badge wymiarów dla wielu przesyłek */
-function generateDimsBadges(items){
+function generateDimsBadges(items, stopId = null){
   if(!items || items.length === 0) return '';
   
   const groups = groupItemsByDimensions(items);
+  
+  // onclick handler - jeśli podano stopId
+  const clickHandler = stopId ? `onclick="event.stopPropagation();showPalletViz(${stopId})"` : '';
+  const cursorStyle = stopId ? 'cursor:pointer;' : '';
+  
+  // Helper do formatowania wymiarów
+  function formatDims(dims){
+    return dims.h ? `${dims.l}×${dims.w}×${dims.h}` : `${dims.l}×${dims.w}`;
+  }
   
   // Jeśli wszystkie mają te same wymiary - pokaż raz z licznikiem
   if(groups.length === 1){
     const g = groups[0];
     const counter = g.count > 1 ? `📦×${g.count} ` : '';
-    return ` <span style="background:#eef7ee;color:#2e7d32;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;">${counter}📐 ${g.dims.l}×${g.dims.w}×${g.dims.h}</span>`;
+    return ` <span ${clickHandler} style="background:#eef7ee;color:#2e7d32;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;${cursorStyle}">${counter}📐 ${formatDims(g.dims)}</span>`;
   }
   
   // Różne wymiary - pokaż wszystkie
   return groups.map(g => {
     const counter = g.count > 1 ? `${g.count}× ` : '';
-    return ` <span style="background:#eef7ee;color:#2e7d32;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;">${counter}📐 ${g.dims.l}×${g.dims.w}×${g.dims.h}</span>`;
+    return ` <span ${clickHandler} style="background:#eef7ee;color:#2e7d32;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;${cursorStyle}">${counter}📐 ${formatDims(g.dims)}</span>`;
   }).join('');
 }
 
@@ -3921,8 +4299,8 @@ async function extractAndGeocode(text){
       isEditing: false, 
       visited: false, 
       isCompany: placeInfo.isCompany, 
-      googlePlaceName: placeInfo.googlePlaceName, 
-      googlePlaceId: placeInfo.googlePlaceId, 
+      googlePlaceName: placeInfo.googlePlaceName || null, 
+      googlePlaceId: placeInfo.googlePlaceId || null, 
       routeIndex: null,
       softQuality: isSoftQuality || isRegionFallback,
       manuallyVerified: false,
@@ -4912,42 +5290,75 @@ async function saveEditDialog(){
 /* Lista przystanków */
 function showPalletViz(stopId){
   const stop = stops.find(s => s.id === stopId);
-  if(!stop || !stop.dims) return;
-  const { l, w, h } = stop.dims;
+  if(!stop) return;
+  
+  // Sprawdź czy są items (wiele paczek z różnymi wymiarami)
+  const hasMultipleItems = stop.items && stop.items.length > 0;
+  const itemsWithDims = hasMultipleItems ? stop.items.filter(item => item.dims) : [];
+  
+  // Jeśli nie ma dims ani items z wymiarami - nie pokazuj
+  if(!stop.dims && itemsWithDims.length === 0) return;
   
   document.getElementById('palletVizName').textContent = stop.name || '';
   
-  // Prosty rzut "pseudo-izometryczny": front (szer.×wys.) + głębokość jako skos.
-  // Skalujemy tak, żeby największy wymiar zmieścił się w ~150px.
-  const maxDim = Math.max(l, w, h, 0.1);
-  const scale = 150 / maxDim;
-  const fw = Math.max(w * scale, 20);
-  const fh = Math.max(h * scale, 20);
-  const fd = Math.max(l * scale * 0.5, 12); // głębokość rysowana skrócona (efekt 3D)
-  const pad = 40;
-  const svgW = fw + fd + pad;
-  const svgH = fh + fd + pad;
-  const ox = pad/2, oy = pad/2 + fd;
+  // Funkcja pomocnicza do rysowania pojedynczej palety
+  function drawPallet(dims, index = 0, total = 1){
+    const { l, w, h } = dims;
+    const maxDim = Math.max(l, w, h || 0.1, 0.1);
+    const scale = 150 / maxDim;
+    const fw = Math.max(w * scale, 20);
+    const fh = Math.max((h || 0.1) * scale, 20);
+    const fd = Math.max(l * scale * 0.5, 12);
+    const pad = 40;
+    const svgW = fw + fd + pad;
+    const svgH = fh + fd + pad;
+    const ox = pad/2, oy = pad/2 + fd;
+    
+    const label = total > 1 ? `<text x="${svgW/2}" y="14" font-size="11" fill="#555" text-anchor="middle" font-weight="700">Paczka ${index + 1}/${total}</text>` : '';
+    
+    return `
+      <svg viewBox="0 0 ${svgW} ${svgH}" width="220" height="${Math.round(220 * svgH / svgW)}" style="margin:${total > 1 ? '8px' : '0'};">
+        ${label}
+        <!-- góra -->
+        <polygon points="${ox},${oy} ${ox+fd},${oy-fd} ${ox+fd+fw},${oy-fd} ${ox+fw},${oy}" fill="#c9e4ca" stroke="#2e7d32" stroke-width="1.5"/>
+        <!-- bok prawy -->
+        <polygon points="${ox+fw},${oy} ${ox+fd+fw},${oy-fd} ${ox+fd+fw},${oy-fd+fh} ${ox+fw},${oy+fh}" fill="#a8d5aa" stroke="#2e7d32" stroke-width="1.5"/>
+        <!-- front -->
+        <rect x="${ox}" y="${oy}" width="${fw}" height="${fh}" fill="#eef7ee" stroke="#2e7d32" stroke-width="1.5"/>
+        <text x="${ox+fw/2}" y="${oy+fh+16}" font-size="11" fill="#2e7d32" text-anchor="middle" font-weight="700">${w} m</text>
+        <text x="${ox-6}" y="${oy+fh/2}" font-size="11" fill="#2e7d32" text-anchor="end" font-weight="700">${h || '?'} m</text>
+        <text x="${ox+fw+fd/2}" y="${oy-fd/2-4}" font-size="11" fill="#2e7d32" text-anchor="middle" font-weight="700">${l} m</text>
+      </svg>`;
+  }
   
-  const svg = `
-    <svg viewBox="0 0 ${svgW} ${svgH}" width="220" height="${Math.round(220 * svgH / svgW)}">
-      <!-- góra -->
-      <polygon points="${ox},${oy} ${ox+fd},${oy-fd} ${ox+fd+fw},${oy-fd} ${ox+fw},${oy}" fill="#c9e4ca" stroke="#2e7d32" stroke-width="1.5"/>
-      <!-- bok prawy -->
-      <polygon points="${ox+fw},${oy} ${ox+fd+fw},${oy-fd} ${ox+fd+fw},${oy-fd+fh} ${ox+fw},${oy+fh}" fill="#a8d5aa" stroke="#2e7d32" stroke-width="1.5"/>
-      <!-- front -->
-      <rect x="${ox}" y="${oy}" width="${fw}" height="${fh}" fill="#eef7ee" stroke="#2e7d32" stroke-width="1.5"/>
-      <text x="${ox+fw/2}" y="${oy+fh+16}" font-size="11" fill="#2e7d32" text-anchor="middle" font-weight="700">${w} m</text>
-      <text x="${ox-6}" y="${oy+fh/2}" font-size="11" fill="#2e7d32" text-anchor="end" font-weight="700">${h} m</text>
-      <text x="${ox+fw+fd/2}" y="${oy-fd/2-4}" font-size="11" fill="#2e7d32" text-anchor="middle" font-weight="700">${l} m</text>
-    </svg>`;
-  document.getElementById('palletVizSvg').innerHTML = svg;
+  // Jeśli mamy wiele items z wymiarami - pokaż wszystkie
+  if(itemsWithDims.length > 1){
+    const svgsHtml = itemsWithDims.map((item, idx) => drawPallet(item.dims, idx, itemsWithDims.length)).join('');
+    document.getElementById('palletVizSvg').innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;">${svgsHtml}</div>`;
+  } else if(itemsWithDims.length === 1){
+    // Jedna paczka z items
+    document.getElementById('palletVizSvg').innerHTML = drawPallet(itemsWithDims[0].dims);
+  } else if(stop.dims){
+    // Stary format - pojedyncze dims na stop
+    document.getElementById('palletVizSvg').innerHTML = drawPallet(stop.dims);
+  }
   
   const metaParts = [];
   if(stop.cargoQty) metaParts.push(`📦 ${stop.cargoQty}`);
-  if(stop.weightKg) metaParts.push(`⚖️ ${stop.weightKg} kg`);
+  if(stop.weightKg || stop.mass) metaParts.push(`⚖️ ${stop.weightKg || stop.mass} kg`);
   if(stop.pm) metaParts.push(`🟧 PM ${stop.pm}`);
-  document.getElementById('palletVizMeta').textContent = metaParts.join('  ·  ') || `${l} × ${w} × ${h} m`;
+  
+  // Jeśli nie ma metadanych, pokaż podstawowe info
+  if(metaParts.length === 0){
+    if(stop.dims){
+      const { l, w, h } = stop.dims;
+      metaParts.push(`${l} × ${w} × ${h || '?'} m`);
+    } else if(itemsWithDims.length > 0){
+      metaParts.push(`${itemsWithDims.length} ${itemsWithDims.length === 1 ? 'paczka' : itemsWithDims.length < 5 ? 'paczki' : 'paczek'}`);
+    }
+  }
+  
+  document.getElementById('palletVizMeta').textContent = metaParts.join('  ·  ');
   
   document.getElementById('palletVizDialog').classList.add('show');
 }
@@ -4975,20 +5386,18 @@ function buildStopItemHtml(stop, displayIndex, options = {}){
           : ` <span style="background:#eef3ff;color:var(--blue);border-radius:8px;padding:1px 7px;font-size:10.5px;font-weight:800;">📦×${stop.packageCount}</span>`
       )
     : '';
-  const pmBadge = stop.pm
-    ? ` <span style="background:#fff3e0;color:#b5651d;border-radius:8px;padding:1px 7px;font-size:10.5px;font-weight:800;">🟧 PM ${stop.pm}</span>`
-    : '';
+  // Usunięto pmBadge - nie jest potrzebny
   const dimsBadge = (stop.items && stop.items.length > 0) 
-    ? generateDimsBadges(stop.items)
+    ? generateDimsBadges(stop.items, stop.id)
     : (stop.dims 
-      ? ` <span onclick="event.stopPropagation();showPalletViz(${stop.id})" style="background:#eef7ee;color:#2e7d32;border-radius:8px;padding:1px 7px;font-size:10.5px;font-weight:800;cursor:pointer;">📐 ${stop.dims.l}×${stop.dims.w}×${stop.dims.h}</span>`
+      ? ` <span onclick="event.stopPropagation();showPalletViz(${stop.id})" style="background:#eef7ee;color:#2e7d32;border-radius:8px;padding:1px 7px;font-size:10.5px;font-weight:800;cursor:pointer;">📐 ${stop.dims.l}×${stop.dims.w}×${stop.dims.h || '?'}</span>`
       : '');
   
   return `
     <div class="stop-item${pending ? ' pending' : ''}${stop.visited ? ' visited' : ''}" data-stop-id="${stop.id}">
       <div class="stop-header">
         <div class="stop-number ${stop.type}${pending ? ' pending' : ''}">${displayIndex != null ? displayIndex : '·'}</div>
-        <div class="stop-title">${qualityBadge}${stop.isCompany ? '🏢 ' : ''}${escapeHtml(stop.name)}${packageBadge}${pmBadge}${dimsBadge}</div>
+        <div class="stop-title">${qualityBadge}${stop.isCompany ? '🏢 ' : ''}${escapeHtml(stop.name)}${packageBadge}${dimsBadge}</div>
         <div class="stop-badge">${stop.type==='start'?'START':stop.type==='end'?'KONIEC':pending?'NA MAPIE':'W TRASIE'}</div>
       </div>
       <div class="stop-address" onclick="toggleStopExpand(${stop.id})">${escapeHtml(stop.address)}</div>
