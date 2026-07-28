@@ -102,6 +102,7 @@
   .candidate-item.ok{border-left:3px solid var(--green);}
   .candidate-item.fail{border-left:3px solid var(--red);opacity:.7;}
   .candidate-item.warn{border-left:3px solid var(--amber);background:#fffaf0;}
+  .candidate-item.uncertain{border-left:3px solid var(--amber);background:#fff4e6;}
   .candidate-item.weak{border-left:3px solid var(--purple);background:#f7f0ff;}
   .candidate-name{font-weight:700;}
   .candidate-addr{color:var(--ink-soft); font-size:10px;}
@@ -843,6 +844,10 @@
     <div class="fix-dialog-box">
       <h3>✏️ Edytuj punkt</h3>
       <div class="desc">Zmień dane punktu na trasie</div>
+      <div style="display:none;">
+        <label>Oryginalny tekst OCR:</label>
+        <div id="editDialogOCR" style="background:#f0f0f0;padding:8px;border-radius:6px;font-size:11px;margin-bottom:10px;font-family:monospace;"></div>
+      </div>
       <label>Nazwa odbiorcy</label>
       <input type="text" id="editDialogName" placeholder="Nazwa firmy / osoba">
       <label>Telefon</label>
@@ -1616,6 +1621,14 @@ function renderFileChipsVision(){
 
 async function processVisionFiles(){
   if(pendingFilesVision.length === 0) return;
+  
+  // Wyczyść poprzednie punkty przed przetworzeniem nowych zdjęć
+  stops = [];
+  stopCounter = 0;
+  renderStops();
+  updateMap();
+  if(routeLine){ map.removeLayer(routeLine); routeLine = null; }
+  
   showProgress(true, 'Google Vision OCR...', `1 / ${pendingFilesVision.length}`);
   let combinedText = ''; let failed = 0;
   for(let i = 0; i < pendingFilesVision.length; i++){
@@ -1676,10 +1689,11 @@ async function extractAndGeocodeVision(text){
   
   console.log(`🔍 Filtr pomorski: ${candidates.length} → ${pomorskieCandidates.length}`);
   
-  let added = 0, duplicates = 0, failed = 0;
+  let added = 0, duplicates = 0, failed = 0, soft = 0;
   
-  // Tablice na wiersze - punkty niepewne NA GÓRZE
+  // Tablice na wiersze - kolejność: niepewne NA GÓRZE
   const failedRows = [];
+  const uncertainRows = [];  // 🟡 Niska jakość geokodowania
   const successRows = [];
   
   for(let idx = 0; idx < pomorskieCandidates.length; idx++){
@@ -1691,7 +1705,6 @@ async function extractAndGeocodeVision(text){
     
     if(!loc){
       candidatesWithIssues.set(idx, c);
-      queueFixDialog(idx, c); // Automatycznie otwórz okno poprawiania
       row.className = 'candidate-item fail';
       row.setAttribute('data-candidate-idx', idx);
       row.innerHTML = `<div style="flex:1;"><div class="candidate-name">❌ ${escapeHtml(c.name)}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(c.query)}</div></div>
@@ -1703,61 +1716,7 @@ async function extractAndGeocodeVision(text){
       failed++;
       continue;
     }
-    // NOWA WALIDACJA: Sprawdź czy zwrócony adres zawiera ulicę
-    // Jeśli geocoding zwrócił tylko miasto (np. "83-300 Kartuzy") bez ulicy, traktuj jako błąd
-    console.log(`🔍 Sprawdzam czy adres ma ulicę: "${loc.formatted}"`);
-    const hasStreet = hasStreetInAddress(loc.formatted);
-    console.log(`🔍 hasStreetInAddress("${loc.formatted}") = ${hasStreet}`);
     
-    if(!hasStreet){
-      console.warn(`⚠️ Geocoding zwrócił tylko miasto bez ulicy dla: ${c.query} → ${loc.formatted}`);
-      candidatesWithIssues.set(idx, c);
-      queueFixDialog(idx, c); // Automatycznie otwórz okno poprawiania
-      row.className = 'candidate-item fail';
-      row.setAttribute('data-candidate-idx', idx);
-      row.innerHTML = `<div style="flex:1;"><div class="candidate-name">🟡 ${escapeHtml(c.name)}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(c.query)} → <span style="color:#f39c12;">brak ulicy</span></div></div>
-        <div class="candidate-actions">
-          <button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button>
-          <button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="removeCandidateRow(this)">🗑️ Usuń</button>
-        </div>`;
-      failedRows.push(row);
-      failed++;
-      continue;
-    }
-    
-    // Sprawdź czy ulica z OCR różni się znacznie od Google (może OCR źle przeczytał)
-    const ocrStreet = extractStreetNameAndNumber(c.query);
-    const googleStreet = extractStreetNameAndNumber(loc.formatted);
-    
-    if(ocrStreet && googleStreet){
-      // Normalizuj do porównania (małe litery, bez znaków specjalnych)
-      const norm1 = ocrStreet.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const norm2 = googleStreet.toLowerCase().replace(/[^a-z0-9]/g, '');
-      
-      // Jeśli różnica jest większa niż 30% długości, prawdopodobnie OCR błąd
-      const maxLen = Math.max(norm1.length, norm2.length);
-      let diffCount = 0;
-      for(let i = 0; i < maxLen; i++){
-        if(norm1[i] !== norm2[i]) diffCount++;
-      }
-      const diffPercent = diffCount / maxLen;
-      
-      if(diffPercent > 0.3){
-        console.warn(`⚠️ Ulica OCR różni się od Google: "${ocrStreet}" vs "${googleStreet}" (${Math.round(diffPercent*100)}% różnicy)`);
-        candidatesWithIssues.set(idx, c);
-        queueFixDialog(idx, c);
-        row.className = 'candidate-item fail';
-        row.setAttribute('data-candidate-idx', idx);
-        row.innerHTML = `<div style="flex:1;"><div class="candidate-name">🟡 ${escapeHtml(c.name)}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(c.query)} → <span style="color:#f39c12;">sprawdź ulicę: ${escapeHtml(ocrStreet)} vs ${escapeHtml(googleStreet)}</span></div></div>
-          <div class="candidate-actions">
-            <button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button>
-            <button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="removeCandidateRow(this)">🗑️ Usuń</button>
-          </div>`;
-        failedRows.push(row);
-        failed++;
-        continue;
-      }
-    }
     if(isDuplicate(loc.lat, loc.lng) || isTextDuplicate(c.name, loc.formatted)){
       row.className = 'candidate-item fail';
       row.innerHTML = `<div><div class="candidate-name">⚠️ duplikat</div><div class="candidate-addr">${escapeHtml(loc.formatted)}</div></div>`;
@@ -1765,37 +1724,21 @@ async function extractAndGeocodeVision(text){
       duplicates++;
       continue;
     }
-    // Sprawdź czy kod pocztowy się zgadza (czy to na pewno ten sam region Polski)
-    const expectedPostal = extractPostalCode(c.query);
-    const gotPostal = extractPostalCode(loc.formatted);
-    
-    if(expectedPostal && gotPostal){
-      const expectedRegion = expectedPostal.substring(0, 2);
-      const gotRegion = gotPostal.substring(0, 2);
-      
-      if(expectedRegion !== gotRegion){
-        // UWAGA: Znaleziono adres w INNYM REGIONIE Polski - NIE DODAWAJ automatycznie!
-        console.warn(`⚠️ PODEJRZANY ADRES: Dokument ${expectedPostal}, Google ${gotPostal} dla "${loc.formatted}"`);
-        candidatesWithIssues.set(idx, c);
-        queueFixDialog(idx, c); // Automatycznie otwórz okno poprawiania
-        row.className = 'candidate-item fail';
-        row.setAttribute('data-candidate-idx', idx);
-        row.innerHTML = `<div style="flex:1;"><div class="candidate-name">⚠️ ${escapeHtml(c.name)}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(c.query)} → <span style="color:#f39c12;">zły kod ${expectedPostal}≠${gotPostal}</span></div></div>
-          <div class="candidate-actions">
-            <button class="btn btn-sm btn-warning" onclick="showFixDialog(${idx}, candidatesWithIssues.get(${idx}))">✏️ Popraw</button>
-            <button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="removeCandidateRow(this)">🗑️ Usuń</button>
-          </div>`;
-        failedRows.push(row);
-        failed++;
-        continue; // NIE dodawaj do stops
-      }
-    }
     
     const placeInfo = await resolveGooglePlace(c.name, loc.formatted, loc.lat, loc.lng);
     
-    // Zdefiniuj zmienne jakości geokodowania (jak w głównej funkcji)
+    // Zdefiniuj zmienne jakości geokodowania
     const isSoftQuality = loc.source === 'roadsWithoutNumber' || loc.priority < 0 || loc.postalMismatch || loc.soft;
     const isRegionFallback = loc.source === 'regionFallback';
+    
+    // Sprawdź czy adres ma ulicę (czy to nie jest samo miasto)
+    const hasStreet = hasStreetInAddress(loc.formatted);
+    const isUncertain = isSoftQuality || isRegionFallback || !hasStreet;
+    
+    if(isUncertain){ 
+      soft++; 
+      console.log(`🟡 Niepewny adres: ${loc.formatted}${!hasStreet ? ' (brak ulicy)' : ''}`); 
+    }
     
     stops.push({ 
       id: ++stopCounter, 
@@ -1820,30 +1763,42 @@ async function extractAndGeocodeVision(text){
       packageCount: c.packageCount || 1, 
       isMultiPackage: c.isMultiPackage || false, 
       isMultiShipment: c.isMultiShipment || false,
-      softQuality: isSoftQuality || isRegionFallback,
-      manuallyVerified: false
+      softQuality: isUncertain,
+      manuallyVerified: false,
+      originalOCR: c.originalOCR || null  // Oryginalny tekst z OCR
     });
+    
     const companyBadge = placeInfo.isCompany ? ' 🏢' : '';
+    const softBadge = isUncertain ? ' 🟡' : '';
     // Usunięto pmBadge - nie jest potrzebny w zakładce Skan
     const dimsBadge = (c.items && c.items.length > 0) 
       ? generateDimsBadges(c.items, stopCounter)
       : (c.dims 
         ? ` <span onclick="event.stopPropagation();showPalletViz(${stopCounter})" style="background:#eef7ee;color:#2e7d32;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;cursor:pointer;">📐 ${c.dims.l}×${c.dims.w}×${c.dims.h || '?'}</span>` 
         : '');
-    row.className = 'candidate-item ok';
+    
+    row.className = isUncertain ? 'candidate-item uncertain' : 'candidate-item ok';
     row.setAttribute('data-stop-id', stopCounter);
-    row.innerHTML = `<div style="flex:1;"><div class="candidate-name">✅ ${escapeHtml(c.name)}${companyBadge}${dimsBadge}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(loc.formatted)}</div></div>
+    row.innerHTML = `<div style="flex:1;"><div class="candidate-name">${isUncertain ? '🟡' : '✅'} ${escapeHtml(c.name)}${companyBadge}${softBadge}${dimsBadge}${phoneSuffix}</div><div class="candidate-addr">${escapeHtml(loc.formatted)}</div></div>
       <div class="candidate-actions">
         <button class="btn btn-sm btn-warning" onclick="showEditDialog(${stopCounter})">✏️ Edytuj</button>
         <button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="removeScanResultStop(${stopCounter})">🗑️ Usuń</button>
       </div>`;
-    successRows.push(row);
+    
+    // Sortuj do odpowiedniej tablicy
+    if(isUncertain){
+      uncertainRows.push(row);
+    } else {
+      successRows.push(row);
+    }
+    
     added++;
     await sleep(150);
   }
   
-  // Dodaj wiersze: NAJPIERW niepewne (czerwone), POTEM sukces (zielone)
+  // Dodaj wiersze: NAJPIERW niepewne (🟡) NA GÓRZE → potem sukces (✅) na dole
   failedRows.forEach(r => resultBox.appendChild(r));
+  uncertainRows.forEach(r => resultBox.appendChild(r));
   successRows.forEach(r => resultBox.appendChild(r));
   
   showProgress(false);
@@ -1853,6 +1808,7 @@ async function extractAndGeocodeVision(text){
     // NIE przełączaj zakładki - zostań w "Skan List"
   }
   let msg = `Dodano ${added}`;
+  if(soft > 0) msg += ` | 🟡 ${soft} niepewnych (sprawdź przed dojazdem)`;
   if(duplicates > 0) msg += ` | Pominięto ${duplicates}`;
   if(failed > 0) msg += ` | Nie znaleziono ${failed}`;
   showToast(msg, added > 0 ? 'success' : 'error');
@@ -1890,6 +1846,14 @@ async function ocrImageTesseract(file){
 
 async function processAllFiles(){
   if(pendingFiles.length === 0) return;
+  
+  // Wyczyść poprzednie punkty przed przetworzeniem nowych zdjęć
+  stops = [];
+  stopCounter = 0;
+  renderStops();
+  updateMap();
+  if(routeLine){ map.removeLayer(routeLine); routeLine = null; }
+  
   showProgress(true, 'Tesseract OCR...', `1 / ${pendingFiles.length}`);
   let combinedText = ''; let failed = 0;
   for(let i = 0; i < pendingFiles.length; i++){
@@ -1927,6 +1891,9 @@ function cleanAddress(addr){
   s = s.replace(/\s+B\/N\b/gi, '');
   s = s.replace(/\s+b\/n\b/gi, '');
   
+  // Usuń nawiasy z nazwami miejscowości (np. "Dębogórska (Dębogórze Wybudowanie) 9" → "Dębogórska 9")
+  s = s.replace(/\s*\([^)]+\)\s*/g, ' ');
+  
   // NAJPIERW napraw częste błędy OCR w nazwach ulic
   s = s.replace(/\bŚw\.\s*arzewsk/gi, 'Swarzewsk'); // Swarzewska → błędnie czytana jako "Św. arzewska"
   s = s.replace(/\bSw\.\s*arzewsk/gi, 'Swarzewsk');
@@ -1957,21 +1924,82 @@ function extractPostalCode(addr){
   return null;
 }
 
+/* Wykrywa czy adres zawiera nazwę ulicy (nie tylko kod pocztowy + miasto) */
+function hasStreetInAddress(address){
+  if(!address) return false;
+  
+  // Usuń "Polska" na końcu
+  let addr = address.replace(/,?\s*Polska\s*$/i, '').trim();
+  
+  // Usuń kod pocztowy + wszystko co PO nim (nazwa miasta/wsi)
+  addr = addr.replace(/\b\d{2}\s*[- ]?\s*\d{3}\b.*$/g, '').trim();
+  
+  // Jeśli nie było kodu pocztowego, sprawdź czy to samo miasto
+  // np. "Puck" lub "Gdańsk" bez ulicy
+  const parts = addr.split(',').map(p => p.trim()).filter(Boolean);
+  
+  // Jeśli jest tylko 1 słowo (np. "Puck"), to nie ma ulicy
+  if(parts.length === 1 && parts[0].split(/\s+/).length === 1){
+    return false;
+  }
+  
+  // Jeśli po usunięciu kodu i miasta zostało coś (nazwa ulicy), to ma ulicę
+  // Jeśli zostało tylko puste lub bardzo krótkie (1-2 znaki), to NIE ma ulicy
+  return addr.length > 2;
+}
+
 // Wyciąga nazwę ulicy + numer z adresu (do porównań OCR vs Google)
-function extractStreetNameAndNumber(addr){
+// Odległość edycyjna Levenshteina - liczba wstawień/usunięć/zamian potrzebnych
+// by zamienić jeden string w drugi. Odporna na przesunięcia (w przeciwieństwie
+// do porównania znak-po-znaku na tej samej pozycji).
+function levenshteinDistance(a, b){
+  if(a === b) return 0;
+  if(a.length === 0) return b.length;
+  if(b.length === 0) return a.length;
+  let prevRow = Array.from({length: b.length + 1}, (_, i) => i);
+  for(let i = 1; i <= a.length; i++){
+    const currRow = [i];
+    for(let j = 1; j <= b.length; j++){
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      currRow.push(Math.min(
+        prevRow[j] + 1,      // usunięcie
+        currRow[j - 1] + 1,  // wstawienie
+        prevRow[j - 1] + cost // zamiana
+      ));
+    }
+    prevRow = currRow;
+  }
+  return prevRow[b.length];
+}
+function extractStreetNameAndNumber(addr, hasNamePrefix){
   if(!addr) return null;
   
-  // Usuń nazwę miasta i kod pocztowy
+  // Usuń "Polska" na końcu
   let clean = addr.replace(/,?\s*Polska\s*$/i, '').trim();
-  clean = clean.replace(/\b\d{2}\s*[- ]?\s*\d{3}\b/g, '').trim();
-  clean = clean.replace(/\b(Kartuzy|Gdańsk|Gdynia|Żukowo|Pruszcz|Wejherowo|Reda|Rumia|Sopot|Pępowo|Glincz|Leszno|Sierakowice|Mściszewice|Skrzeszewo|Krokowa|Mrzezino|Kartoszyno)\b/gi, '').trim();
   
-  // Usuń nazwę odbiorcy (pierwszy fragment przed przecinkiem)
-  const parts = clean.split(',').map(p => p.trim());
-  if(parts.length > 1) clean = parts.slice(1).join(', ').trim();
+  // Usuń kod pocztowy + wszystko co PO nim (to jest nazwa miasta/wsi/kolonii)
+  // Przykład: "Dębogórska, 84-230 Dębogórze-Wybudowanie" → "Dębogórska"
+  clean = clean.replace(/\b\d{2}\s*[- ]?\s*\d{3}\b.*$/g, '').trim();
   
-  // Zostaje ulica + numer (np. "Kolejowa 21")
-  return clean.replace(/^(ul\.|ulica)\s+/i, '').trim();
+  const parts = clean.split(',').map(p => p.trim()).filter(Boolean);
+  if(parts.length === 0) return null;
+  
+  // hasNamePrefix=true: tekst zaczyna się od nazwy odbiorcy (jak w OCR) -> ulica to KOLEJNY segment.
+  // hasNamePrefix=false: tekst zaczyna się od razu od ulicy (jak formatted_address z Google) -> ulica to PIERWSZY segment.
+  let result = hasNamePrefix
+    ? (parts.length > 1 ? parts[1] : parts[0])
+    : parts[0];
+  
+  // Usuń przedrostki ul./ulica
+  result = result.replace(/^(ul\.|ulica)\s+/i, '').trim();
+  
+  // Usuń nawiasy z nazwami miejscowości (np. "Dębogórska (Dębogórze Wybudowanie)" → "Dębogórska")
+  result = result.replace(/\s*\([^)]+\)\s*/g, ' ').trim();
+  
+  // Usuń tytuły/stopnie wojskowe/honorowe: Generała, ks., im., św., bł., mjr, płk itp.
+  result = result.replace(/\b(generała|generala|gen\.|ks\.|księdza|ksiedza|im\.|imienia|św\.|świętego|swietego|bł\.|błogosławionego|blogoslawionego|mjr\.|mjr|major|majora|płk\.|płk|pułkownika|pulkownika|kpt\.|kapitana)\s+/gi, '').trim();
+  
+  return result;
 }
 function extractPostalPrefix(addr){
   if(!addr) return null;
@@ -1985,9 +2013,18 @@ function extractCity(addr){
   // Znajdź kod pocztowy
   const m = clean.match(/(\d{2})\s*[- ]?\s*(\d{3})/);
   if(m){
-    // Weź fragment PRZED kodem pocztowym
+    // Sprawdź co jest PO kodzie pocztowym (np. "84-230, Rumia" → "Rumia")
+    const afterPostal = clean.substring(m.index + m[0].length).trim();
+    if(afterPostal){
+      // Usuń przecinki z początku i weź pierwszą część
+      const cityAfter = afterPostal.replace(/^[,\s]+/, '').split(',')[0].trim();
+      if(cityAfter && cityAfter.length > 2){
+        return cityAfter;
+      }
+    }
+    
+    // Jeśli nic po kodzie, sprawdź co jest PRZED kodem
     const before = clean.substring(0, m.index);
-    // Ostatni element przed kodem to zwykle miasto
     const parts = before.split(',').map(p => p.trim()).filter(Boolean);
     if(parts.length > 0){
       const cityCandidate = parts[parts.length - 1];
@@ -2000,21 +2037,20 @@ function extractCity(addr){
 function extractStreetWithNumber(addr){
   if(!addr) return null;
   
-  // Usuń kod pocztowy z adresu
-  const noPostal = addr.replace(/(\d{2})\s*[- ]?\s*(\d{3})/, '').replace(/,\s*$/,'').trim();
-  
+  // Format może być: "NAZWA, ULICA NUMER, KOD, MIASTO" lub "NAZWA, ULICA NUMER, MIASTO KOD"
   // Podziel na części po przecinkach
-  const parts = noPostal.split(',').map(p => p.trim()).filter(Boolean);
+  const parts = addr.split(',').map(p => p.trim()).filter(Boolean);
   
-  // Pierwsza część to zwykle nazwa (pomiń)
-  // Druga część to zwykle ulica + numer
+  // Jeśli są co najmniej 2 części, druga to zwykle ulica + numer
   if(parts.length >= 2){
-    return parts[1]; // Ulica z numerem
+    const streetPart = parts[1];
+    // Usuń kod pocztowy jeśli jest w tej części
+    return streetPart.replace(/\b\d{2}\s*[- ]?\s*\d{3}\b.*$/, '').trim();
   }
   
-  // Jeśli jest tylko jedna część (bez nazwy), to ona jest ulicą
+  // Jeśli jest tylko jedna część (bez nazwy), usuń kod i zwróć resztę
   if(parts.length === 1){
-    return parts[0];
+    return parts[0].replace(/\b\d{2}\s*[- ]?\s*\d{3}\b.*$/, '').trim();
   }
   
   return null;
@@ -2069,6 +2105,20 @@ function extractNameFromAddress(addr){
   if(name.length < 4) name = addr.split(/[,\s]/).slice(0,3).join(' ');
   if(!name) name = 'Odbiorca';
   return name;
+}
+
+/* Usuwa nazwę odbiorcy z adresu - zwraca sam adres bez nazwy */
+function removeNameFromAddress(addr){
+  // Podziel po przecinkach
+  const parts = addr.split(',').map(p => p.trim()).filter(Boolean);
+  
+  // Jeśli jest tylko 1 część, zwróć ją (to sam adres)
+  if(parts.length <= 1) return addr;
+  
+  // Usuń pierwszą część (nazwa) i zwróć resztę
+  const addressOnly = parts.slice(1).join(', ');
+  
+  return addressOnly;
 }
 function findPhoneNear(anchor, lines){
   const lo = Math.max(0, anchor - 2);
@@ -2367,7 +2417,7 @@ const PALLET_CODES = {
       console.log(`✅ Finalne wymiary dla "${name}": ${dims.l}×${dims.w}${dims.h ? '×' + dims.h : ''}m`);
     }
     
-    candidates.push({ name, query: addr, phone, source: 'DOK_ZAL', pm, dims, cargoQty, mass, volume });
+    candidates.push({ name, query: addr, phone, source: 'DOK_ZAL', pm, dims, cargoQty, mass, volume, originalOCR: addr });
   });
 
   // Strategia 2: (KLIENT) — SUS
@@ -2434,7 +2484,7 @@ const PALLET_CODES = {
     console.log(`📦 "${name}" znaleziono ${items.length} wymiarów:`, items);
     if(items.length === 0) console.warn(`⚠️ Brak wymiarów dla "${name}" w bloku`);
     
-    if(query.length > 8) candidates.push({ name, query, phone, source: 'KLIENT', dims, weightKg, cargoQty, items });
+    if(query.length > 8) candidates.push({ name, query, phone, source: 'KLIENT', dims, weightKg, cargoQty, items, originalOCR: full });
   }
 
   // Strategia 3: Odbiorca: / Odbiersa: / Dbiorca:
@@ -2460,7 +2510,7 @@ const PALLET_CODES = {
     const cleaned = cleanAddress(addr);
     const name = extractNameFromAddress_Vision(cleaned);
     const phone = findPhoneNear_Vision(i, lines);
-    candidates.push({ name, query: cleaned, phone, source: 'ODBIERCA' });
+    candidates.push({ name, query: cleaned, phone, source: 'ODBIERCA', originalOCR: cleaned });
   }
 
   // Strategia 4: Numer-adres (ID + 4 linie)
@@ -2480,7 +2530,7 @@ const PALLET_CODES = {
     const hasLetters = /[A-ZŻŹĆŃŁŚĄĘÓa-ząćęłńóśźż]{2,}/.test(full);
     if(full.length > 6 && hasLetters){
       const name = extractNameFromAddress_Vision(full);
-      candidates.push({ name, query: full, phone: '', source: 'ID_LIST' });
+      candidates.push({ name, query: full, phone: '', source: 'ID_LIST', originalOCR: full });
     }
   }
 
@@ -2657,15 +2707,17 @@ function extractCandidatesFromText_Tesseract(text){
       usedLineIdx.add(j);
       const addr = cleanAddress(lines[j]);
       const name = extractNameFromAddress(addr);
+      const addressOnly = removeNameFromAddress(addr);
       const phone = findPhoneNear(j, lines);
-      console.log(`➕ Dodano kandydata: "${name}" - query: "${addr}" - tracking: ${trackingNumber}`);
+      console.log(`➕ Dodano kandydata: "${name}" - query: "${addressOnly}" - tracking: ${trackingNumber}`);
       
       const candidate = { 
         name, 
-        query: addr, 
+        query: addressOnly, 
         phone, 
         source: 'DOK_ZAL', 
-        trackingNumber 
+        trackingNumber,
+        originalOCR: addr  // Zapisz oryginalny tekst OCR
       };
       
       // Dodaj wymiary i wagę jeśli znaleziono w tym okienku
@@ -2814,12 +2866,14 @@ function extractCandidatesFromText_Tesseract(text){
     const hasLetters = /[A-ZŻŹĆŃŁŚĄĘÓa-ząćęłńóśźż]{2,}/.test(full);
     if(full.length > 6 && hasLetters){
       const name = extractNameFromAddress(full);
+      const addressOnly = removeNameFromAddress(full);  // ← Usuń nazwę z query
       const candidate = { 
         name, 
-        query: full, 
+        query: addressOnly,  // ← Użyj adresu BEZ NAZWY
         phone: '', 
         source: 'ID_LIST', 
-        trackingNumber: line.trim() 
+        trackingNumber: line.trim(),
+        originalOCR: full  // ← Zapisz oryginalny tekst
       };
       
       // Dodaj wymiary i wagę jeśli znaleziono
@@ -3439,6 +3493,8 @@ async function geocodeNominatim(rawAddress){
 async function geocodeSoft(rawAddress){
   const address = cleanAddress(rawAddress);
   const street = extractStreetWithNumber(address);
+  const expectedPostal = extractPostalCode(address);
+  const expectedRegion = expectedPostal ? expectedPostal.substring(0, 2) : (dominantRegion || null);
   const queries = [];
   let q1 = address.replace(/\d{2}\s*[- ]?\s*\d{3}\b/g, '').replace(/,\s*,/g, ',').replace(/,\s*$/,'').trim();
   if(q1) queries.push(q1 + ', Polska');
@@ -3453,6 +3509,7 @@ async function geocodeSoft(rawAddress){
       const res = await fetch(url, { headers: { 'Accept-Language': 'pl' } });
       const data = await res.json();
       if(data && data.length > 0){
+        // Preferuj kandydata z dominującym regionem trasy
         if(dominantRegion){
           const inRegion = data.filter(d => extractPostalPrefix(d.display_name) === dominantRegion);
           if(inRegion.length > 0){
@@ -3460,7 +3517,15 @@ async function geocodeSoft(rawAddress){
             return { lat: parseFloat(best.lat), lng: parseFloat(best.lon), formatted: formatNominatimAddress(best), postal: extractPostalCode(best.display_name), soft: true };
           }
         }
-        return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), formatted: formatNominatimAddress(data[0]), postal: extractPostalCode(data[0].display_name), soft: true };
+        // TWARDA WALIDACJA: odrzuć kandydatów z zupełnie innego regionu Polski (inny niż dokument/trasa)
+        const first = data[0];
+        const firstPostal = extractPostalCode(first.display_name);
+        const firstRegion = firstPostal ? firstPostal.substring(0, 2) : null;
+        if(expectedRegion && firstRegion && firstRegion !== expectedRegion){
+          console.log(`⏭️ geocodeSoft: pomijam wynik z innego regionu (${expectedRegion} ≠ ${firstRegion}): "${first.display_name}"`);
+          continue; // Spróbuj kolejnego zapytania zamiast zaakceptować złe miejsce
+        }
+        return { lat: parseFloat(first.lat), lng: parseFloat(first.lon), formatted: formatNominatimAddress(first), postal: firstPostal, soft: true };
       }
     }catch(e){
       console.error('geocodeSoft Nominatim error:', e);
@@ -3476,7 +3541,14 @@ async function geocodeSoft(rawAddress){
       incrementApiUsage('geocoding');
       if(data.status === 'OK' && data.results.length > 0 && !data.results[0].types.includes('country')){
         const place = data.results[0];
-        return { lat: place.geometry.location.lat, lng: place.geometry.location.lng, formatted: place.formatted_address, postal: extractPostalCode(place.formatted_address), soft: true };
+        const gotPostal = extractPostalCode(place.formatted_address);
+        const gotRegion = gotPostal ? gotPostal.substring(0, 2) : null;
+        // TWARDA WALIDACJA: odrzuć wynik z zupełnie innego regionu Polski
+        if(expectedRegion && gotRegion && gotRegion !== expectedRegion){
+          console.log(`⏭️ geocodeSoft (Google): pomijam wynik z innego regionu (${expectedRegion} ≠ ${gotRegion}): "${place.formatted_address}"`);
+          continue;
+        }
+        return { lat: place.geometry.location.lat, lng: place.geometry.location.lng, formatted: place.formatted_address, postal: gotPostal, soft: true };
       }
     }catch(e){
       console.error('geocodeSoft Google error:', e);
@@ -3501,11 +3573,11 @@ async function geocodeRegionFallback(){
   return null;
 }
 async function geocodeAddress(address){
-  // Timeout 30 sekund dla całego geokodowania
+  // Timeout 60 sekund dla całego geokodowania (zwiększony z 30s)
   const timeoutPromise = new Promise((resolve) => setTimeout(() => {
     console.warn('⏱️ Geokodowanie przekroczyło limit czasu dla:', address);
     resolve(null);
-  }, 30000));
+  }, 60000));
   
   const geocodePromise = (async () => {
     let loc = await geocodeGoogle(address);
@@ -3559,22 +3631,20 @@ function hasStreetInAddress(address){
   // Usuń "Polska" na końcu
   let addr = address.replace(/,?\s*Polska\s*$/i, '').trim();
   
-  // Usuń kod pocztowy
-  addr = addr.replace(/\b\d{2}\s*[- ]?\s*\d{3}\b/g, '');
+  // Usuń kod pocztowy + wszystko co PO nim (nazwa miasta/wsi/kolonii)
+  // Przykład: "Gabrieli Zapolskiej, 84-230 Rumia" → "Gabrieli Zapolskiej"
+  addr = addr.replace(/\b\d{2}\s*[- ]?\s*\d{3}\b.*$/g, '').trim();
   
   // Lista typowych słów-kluczy ulic
   const streetKeywords = /\b(ul\.|ulica|ulicy|aleja|aleji|aleje|plac|placu|rondo|osiedle|skwer|park|droga|drogi|dróg)\b/i;
   // Jeśli zawiera typowe słowo ulicy, to ma ulicę
   if(streetKeywords.test(addr)) return true;
   
-  // Usuń nazwy miast
-  addr = addr.replace(/\b(Kartuzy|Gdańsk|Gdynia|Żukowo|Pruszcz|Wejherowo|Reda|Rumia|Sopot|Pępowo|Glincz|Leszno|Sierakowice|Mściszewice|Skrzeszewo)\b/gi, '').trim();
-  
   // Usuń przecinki i spacje
   const clean = addr.replace(/[,\s]+/g, '');
   
-  // Jeśli po usunięciu miast i kodu zostało coś (nazwa ulicy + numer), to ma ulicę
-  // Jeśli zostało tylko puste lub bardzo krótkie (1-2 znaki), to NIE ma ulicy
+  // Jeśli po usunięciu kodu i miejscowości zostało coś (nazwa ulicy), to ma ulicę
+  // Jeśli zostało tylko puste lub bardzo krótkie (1-2 znaki), to NIE ma ulicy (kolonia bez ulicy)
   return clean.length > 2;
 }
 const POLISH_FIRST_NAMES = new Set([
@@ -4016,11 +4086,13 @@ function showFixDialog(idx, candidate){
   fixDialogIdx = idx;
   const c = candidate;
   
-  // Wyciągnij ulicę i miasto z adresu OCR, ale BEZ kodu pocztowego — dokumenty
-  // kurierskie często mają nieaktualny kod, a to tylko myli i użytkownika, i geokoder.
+  // Wyciągnij ulicę i miasto z adresu OCR
   const street = extractStreetWithNumber(c.query) || '';
+  const postalCode = extractPostalCode(c.query) || '';
   const city = extractCity(c.query) || '';
-  const oneLineAddress = [street, city].filter(Boolean).join(', ');
+  
+  // Złóż adres: ulica, kod pocztowy miasto (format Google)
+  const oneLineAddress = [street, postalCode, city].filter(Boolean).join(', ');
   
   document.getElementById('fixName').value = c.name || '';
   document.getElementById('fixAddress').value = oneLineAddress;
@@ -4284,7 +4356,14 @@ async function extractAndGeocode(text){
     const isSoftQuality = loc.source === 'roadsWithoutNumber' || loc.priority < 0 || loc.postalMismatch;
     const isRegionFallback = loc.source === 'regionFallback';
     
-    if(isSoftQuality){ soft++; console.log(`⚠️ Niska jakość: ${loc.formatted}`); }
+    // Sprawdź czy adres ma ulicę (czy to nie jest samo miasto)
+    const hasStreet = hasStreetInAddress(loc.formatted);
+    const isUncertain = isSoftQuality || isRegionFallback || !hasStreet;
+    
+    if(isUncertain){ 
+      soft++; 
+      console.log(`🟡 Niepewny adres: ${loc.formatted}${!hasStreet ? ' (brak ulicy)' : ''}`); 
+    }
     if(isRegionFallback){ regionFallback++; console.log(`🔄 Fallback region: ${loc.formatted}`); }
     
     const placeInfo = await resolveGooglePlace(c.name, loc.formatted, loc.lat, loc.lng);
@@ -4302,14 +4381,15 @@ async function extractAndGeocode(text){
       googlePlaceName: placeInfo.googlePlaceName || null, 
       googlePlaceId: placeInfo.googlePlaceId || null, 
       routeIndex: null,
-      softQuality: isSoftQuality || isRegionFallback,
+      softQuality: isUncertain,
       manuallyVerified: false,
-      packageCount: c.packageCount || 1
+      packageCount: c.packageCount || 1,
+      originalOCR: c.originalOCR || null  // Oryginalny tekst z OCR
     });
     
     const companyBadge = placeInfo.isCompany ? ' 🏢' : '';
     const suspiciousBadge = !isLocalRegion && dominantRegion ? ' ⚠️' : '';
-    const softBadge = (isSoftQuality || isRegionFallback) ? ' 🟡' : '';
+    const softBadge = isUncertain ? ' 🟡' : '';
     
     // Rozróżnij paczki (ta sama podstawa numeru) vs przesyłki (różne numery)
     let packageBadge = '';
@@ -4323,9 +4403,9 @@ async function extractAndGeocode(text){
       }
     }
     
-    row.className = 'candidate-item ok';
+    row.className = isUncertain ? 'candidate-item uncertain' : 'candidate-item ok';
     row.innerHTML = `<div style="flex:1;">
-      <div class="candidate-name">✅ ${escapeHtml(c.name)}${companyBadge}${suspiciousBadge}${softBadge}${packageBadge}${phoneSuffix}</div>
+      <div class="candidate-name">${isUncertain ? '🟡' : '✅'} ${escapeHtml(c.name)}${companyBadge}${suspiciousBadge}${softBadge}${packageBadge}${phoneSuffix}</div>
       <div class="candidate-addr">${escapeHtml(loc.formatted)}</div>
     </div>
     <div class="candidate-actions">
@@ -4336,7 +4416,7 @@ async function extractAndGeocode(text){
     if(!isLocalRegion && dominantRegion){
       suspiciousRows.push(row);
       suspicious++;
-    } else if(isSoftQuality || isRegionFallback){
+    } else if(isUncertain){
       uncertainRows.push(row);
     } else {
       normalRows.push(row);
@@ -4361,6 +4441,7 @@ async function extractAndGeocode(text){
   }
   let msg = `Dodano ${added}`;
   if(suspicious > 0) msg += ` | ⚠️ ${suspicious} podejrzanych (inny region)`;
+  if(soft > 0) msg += ` | 🟡 ${soft} niepewnych (sprawdź przed dojazdem)`;
   if(duplicates > 0) msg += ` | Pominięto ${duplicates}`;
   if(failed > 0) msg += ` | Nie znaleziono ${failed}`;
   showToast(msg, added > 0 ? 'success' : 'error');
@@ -5239,6 +5320,20 @@ function showEditDialog(id){
   document.getElementById('editDialogName').value = stop.name || '';
   document.getElementById('editDialogPhone').value = stop.phone || '';
   document.getElementById('editDialogAddress').value = stop.address || '';
+  
+  // Pokaż oryginalny tekst OCR jeśli istnieje
+  const ocrDisplay = document.getElementById('editDialogOCR');
+  if(ocrDisplay){
+    if(stop.originalOCR){
+      ocrDisplay.textContent = stop.originalOCR;
+      ocrDisplay.style.display = 'block';
+      ocrDisplay.parentElement.style.display = 'block';
+    } else {
+      ocrDisplay.style.display = 'none';
+      ocrDisplay.parentElement.style.display = 'none';
+    }
+  }
+  
   document.getElementById('editDialog').classList.add('show');
 }
 
@@ -5269,6 +5364,7 @@ async function saveEditDialog(){
       stop.lat = loc.lat;
       stop.lng = loc.lng;
       stop.manuallyVerified = true;  // Oznacz jako zweryfikowany ręcznie
+      stop.softQuality = false;  // Usuń flagę niepewności - adres poprawiony!
       
       const placeInfo = await resolveGooglePlace(stop.name, stop.address, stop.lat, stop.lng);
       stop.isCompany = placeInfo.isCompany;
@@ -5278,6 +5374,10 @@ async function saveEditDialog(){
       renderStops();
       updateMap(false);
       calculateRoute();
+      
+      // ODŚWIEŻ wiersz w liście kandydatów (zakładka Apka/Skan List)
+      updateCandidateRow(stop);
+      
       showToast('Zaktualizowano punkt');
     }
   } else {
@@ -5285,6 +5385,74 @@ async function saveEditDialog(){
   }
   
   editingStopId = null;
+}
+
+/* Funkcja aktualizująca wiersz kandydata po edycji */
+function updateCandidateRow(stop){
+  // Szukaj wiersza z atrybutem data-stop-id (zakładka "Skan List")
+  const rowByStopId = document.querySelector(`.candidate-item[data-stop-id="${stop.id}"]`);
+  
+  if(rowByStopId){
+    // Zakładka "Skan List" (Vision)
+    const companyBadge = stop.isCompany ? ' 🏢' : '';
+    const softBadge = stop.softQuality ? ' 🟡' : '';
+    const phoneSuffix = stop.phone ? ` · 📞 ${escapeHtml(stop.phone)}` : '';
+    const verifiedBadge = stop.manuallyVerified ? ' ✅' : '';
+    
+    // Wymiary i PM dla zakładki Skan List
+    const dimsBadge = (stop.items && stop.items.length > 0) 
+      ? generateDimsBadges(stop.items, stop.id)
+      : (stop.dims 
+        ? ` <span onclick="event.stopPropagation();showPalletViz(${stop.id})" style="background:#eef7ee;color:#2e7d32;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;cursor:pointer;">📐 ${stop.dims.l}×${stop.dims.w}×${stop.dims.h || '?'}</span>` 
+        : '');
+    
+    rowByStopId.className = stop.softQuality ? 'candidate-item uncertain' : 'candidate-item ok';
+    rowByStopId.innerHTML = `<div style="flex:1;">
+      <div class="candidate-name">${stop.softQuality ? '🟡' : '✅'}${verifiedBadge} ${escapeHtml(stop.name)}${companyBadge}${softBadge}${dimsBadge}${phoneSuffix}</div>
+      <div class="candidate-addr">${escapeHtml(stop.address)}</div>
+    </div>
+    <div class="candidate-actions">
+      <button class="btn btn-sm btn-warning" onclick="showEditDialog(${stop.id})">✏️ Edytuj</button>
+      <button class="btn btn-sm" style="background:#e74c3c;color:#fff;" onclick="removeScanResultStop(${stop.id})">🗑️ Usuń</button>
+    </div>`;
+    
+    return;
+  }
+  
+  // Zakładka "Apka" (Tesseract) - szukaj po onclick="editStopFromCandidate"
+  const buttons = document.querySelectorAll('button[onclick*="editStopFromCandidate"]');
+  for(const btn of buttons){
+    const match = btn.getAttribute('onclick').match(/editStopFromCandidate\((\d+)\)/);
+    if(match && parseInt(match[1]) === stop.id){
+      const row = btn.closest('.candidate-item');
+      if(!row) continue;
+      
+      // Odśwież treść wiersza
+      const companyBadge = stop.isCompany ? ' 🏢' : '';
+      const softBadge = stop.softQuality ? ' 🟡' : '';
+      const phoneSuffix = stop.phone ? ` · 📞 ${escapeHtml(stop.phone)}` : '';
+      const verifiedBadge = stop.manuallyVerified ? ' ✅' : '';
+      
+      let packageBadge = '';
+      if(stop.packageCount && stop.packageCount > 1){
+        packageBadge = ` <span style="background:#eef3ff;color:var(--blue);border-radius:8px;padding:1px 7px;font-size:10px;font-weight:800;">📦×${stop.packageCount} paczki</span>`;
+      }
+      
+      // Dodaj klasę "uncertain" jeśli punkt jest niepewny
+      row.className = stop.softQuality ? 'candidate-item uncertain' : 'candidate-item ok';
+      
+      row.innerHTML = `<div style="flex:1;">
+        <div class="candidate-name">${stop.softQuality ? '🟡' : '✅'}${verifiedBadge} ${escapeHtml(stop.name)}${companyBadge}${softBadge}${packageBadge}${phoneSuffix}</div>
+        <div class="candidate-addr">${escapeHtml(stop.address)}</div>
+      </div>
+      <div class="candidate-actions">
+        <button class="btn btn-sm btn-ghost" onclick="editStopFromCandidate(${stop.id})">✏️ Edytuj</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteStopFromCandidate(${stop.id})">🗑️ Usuń</button>
+      </div>`;
+      
+      break;
+    }
+  }
 }
 
 /* Lista przystanków */
